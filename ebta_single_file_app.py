@@ -1734,7 +1734,13 @@ def page(title, body_html, extra_head="", extra_js=""):
       if ("serviceWorker" in navigator) {{
         navigator.serviceWorker.register("/static/sw.js");
       }}
+
+      window.addEventListener("beforeinstallprompt", e => {{
+        e.preventDefault();
+        window.deferredPrompt = e;
+      }});
     </script>
+
 
 
     {GOOGLE_FONTS}{BASE_CSS}{BASE_JS}{extra_head}
