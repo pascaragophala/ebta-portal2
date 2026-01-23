@@ -1731,10 +1731,11 @@ def page(title, body_html, extra_head="", extra_js=""):
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#0f172a">
     <script>
-      if ("serviceWorker" in navigator) {
+      if ("serviceWorker" in navigator) {{
         navigator.serviceWorker.register("/static/sw.js");
-      }
+      }}
     </script>
+
 
     {GOOGLE_FONTS}{BASE_CSS}{BASE_JS}{extra_head}
     </head><body>
