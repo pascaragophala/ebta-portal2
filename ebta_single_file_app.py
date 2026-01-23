@@ -1739,7 +1739,16 @@ def page(title, body_html, extra_head="", extra_js=""):
         e.preventDefault();
         window.deferredPrompt = e;
       }});
+
+      function installApp() {{
+        if (window.deferredPrompt) {{
+          window.deferredPrompt.prompt();
+        }} else {{
+          alert("Install option not available yet. Use your browser menu.");
+        }}
+      }}
     </script>
+
 
 
 
@@ -1754,8 +1763,13 @@ def page(title, body_html, extra_head="", extra_js=""):
             <div class='title'>EBTA Portal</div>
         </div>
         <div class='links'>
-            <a href='/'>Home</a>{right}
+            <a href='/'>Home</a>
+            <button onclick="installApp()" class="btn success mini" style="margin-left:8px">
+                Install App
+            </button>
+            {right}
         </div>
+
         </div>
     </header>
 
