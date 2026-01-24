@@ -5611,29 +5611,30 @@ def admin_analytics():
     conn = get_db()
     cur = conn.cursor()
 
-    # --- KPI metrics ---
-    cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=?", (month,))
-    total = cur.fetchone()['c'] or 0
+    # --- KPI ---
+    cur.execute("SELECT COUNT(*) FROM enrollments WHERE month=?", (month,))
+    total = cur.fetchone()[0] or 0
 
     def count_status(s):
-        cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=? AND status=?", (month,s))
-        return cur.fetchone()['c'] or 0
+        cur.execute("SELECT COUNT(*) FROM enrollments WHERE month=? AND status=?", (month,s))
+        return cur.fetchone()[0] or 0
 
     pending = count_status('PENDING')
     active = count_status('ACTIVE')
     lapsed = count_status('LAPSED')
 
-    cur.execute("SELECT SUM(amount_paid) AS r FROM enrollments WHERE month=? AND status='ACTIVE'", (month,))
-    revenue = cur.fetchone()['r'] or 0
+    cur.execute("SELECT SUM(amount_paid) FROM enrollments WHERE month=? AND status='ACTIVE'", (month,))
+    revenue = cur.fetchone()[0] or 0
 
-    # --- New vs returning ---
+    avg_payment = int(revenue / active) if active else 0
+    conversion = int((active / total) * 100) if total else 0
+
+    # --- New vs Returning ---
     cur.execute("""
         SELECT COUNT(DISTINCT student_id)
         FROM enrollments
         WHERE month=? AND status='ACTIVE'
-        AND student_id NOT IN (
-            SELECT student_id FROM enrollments WHERE month < ?
-        )
+        AND student_id NOT IN (SELECT student_id FROM enrollments WHERE month < ?)
     """, (month, month))
     new_students = cur.fetchone()[0] or 0
 
@@ -5641,103 +5642,98 @@ def admin_analytics():
         SELECT COUNT(DISTINCT student_id)
         FROM enrollments
         WHERE month=? AND status='ACTIVE'
-        AND student_id IN (
-            SELECT student_id FROM enrollments WHERE month < ?
-        )
+        AND student_id IN (SELECT student_id FROM enrollments WHERE month < ?)
     """, (month, month))
     returning = cur.fetchone()[0] or 0
 
-    # --- Revenue per day ---
+    # --- Enrollments per day ---
     cur.execute("""
-        SELECT substr(created_at,1,10) AS day, SUM(amount_paid) AS r
+        SELECT substr(created_at,1,10) AS day, COUNT(*) AS c
         FROM enrollments
-        WHERE month=? AND status='ACTIVE'
+        WHERE month=?
         GROUP BY day ORDER BY day
     """, (month,))
-    rev_rows = cur.fetchall()
-    rev_labels = [r['day'] for r in rev_rows]
-    rev_data = [r['r'] for r in rev_rows]
+    growth = cur.fetchall()
+    growth_labels = [r['day'] for r in growth]
+    growth_data = [r['c'] for r in growth]
 
-    # --- Attendance trend ---
+    # --- Revenue per subject ---
     cur.execute("""
-        SELECT a.date, COUNT(*) AS c
-        FROM attendance a
-        WHERE strftime('%Y-%m', a.date)=?
-        GROUP BY a.date ORDER BY a.date
+        SELECT sub.name, SUM(e.amount_paid) AS r
+        FROM enrollments e
+        JOIN subjects sub ON sub.id=e.subject_id
+        WHERE e.month=? AND e.status='ACTIVE'
+        GROUP BY sub.name
+        ORDER BY r DESC
     """, (month,))
-    att_rows = cur.fetchall()
-    att_labels = [r['date'] for r in att_rows]
-    att_data = [r['c'] for r in att_rows]
+    revsub = cur.fetchall()
+    revsub_labels = [r['name'] for r in revsub]
+    revsub_data = [r['r'] for r in revsub]
 
-    # --- Subject table ---
-    cur.execute("SELECT id,name,grade FROM subjects ORDER BY grade,name")
-    subs = cur.fetchall()
+    # --- Students per grade ---
+    cur.execute("""
+        SELECT grade, COUNT(*) AS c
+        FROM students
+        GROUP BY grade
+    """)
+    grades = cur.fetchall()
+    grade_labels = [grade_label(r['grade']) for r in grades]
+    grade_data = [r['c'] for r in grades]
 
-    rows=[]
-    for s in subs:
-        cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE subject_id=? AND month=? AND status='ACTIVE'", (s['id'], month))
-        active_students = cur.fetchone()['c'] or 0
+    # --- Students per province ---
+    cur.execute("""
+        SELECT province, COUNT(*) AS c
+        FROM students
+        GROUP BY province
+        ORDER BY c DESC
+    """)
+    prov = cur.fetchall()
+    prov_labels = [r['province'] for r in prov]
+    prov_data = [r['c'] for r in prov]
 
-        cur.execute("""SELECT COUNT(*) AS c FROM attendance a
-                       JOIN sessions se ON se.id=a.session_id
-                       WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?""", (s['id'], month))
-        att = cur.fetchone()['c'] or 0
-
-        rows.append(f"""
-        <tr>
-            <td>{grade_label(s['grade'])} — {s['name']}</td>
-            <td>{active_students}</td>
-            <td>{att}</td>
-        </tr>
-        """)
+    # --- Multi-subject behaviour ---
+    cur.execute("""
+        SELECT subjects_count, COUNT(*) AS c FROM (
+            SELECT student_id, COUNT(*) AS subjects_count
+            FROM enrollments
+            WHERE month=? AND status='ACTIVE'
+            GROUP BY student_id
+        )
+        GROUP BY subjects_count
+        ORDER BY subjects_count
+    """, (month,))
+    multi = cur.fetchall()
+    multi_labels = [str(r['subjects_count'])+" subjects" for r in multi]
+    multi_data = [r['c'] for r in multi]
 
     conn.close()
 
     body = f"""
     {admin_nav()}
 
-    <!-- KPI CARDS -->
     <section class='stats big'>
         {stat('Revenue', f'R{revenue}')}
         {stat('Enrollments', total)}
         {stat('Active', active)}
-        {stat('New students', new_students)}
+        {stat('Conversion', f'{conversion}%')}
+        {stat('Avg Payment', f'R{avg_payment}')}
         {stat('Returning', returning)}
-        {stat('Lapsed', lapsed)}
     </section>
 
-    <!-- GRAPHS GRID -->
     <section class='grid'>
-        <div class='card'><h2>Revenue Trend</h2><canvas id="revChart"></canvas></div>
-        <div class='card'><h2>Students Mix</h2><canvas id="studentChart"></canvas></div>
-        <div class='card'><h2>Enrollment Status</h2><canvas id="statusChart"></canvas></div>
-        <div class='card'><h2>Attendance Trend</h2><canvas id="attChart"></canvas></div>
+        <div class='card'><h2>Growth</h2><canvas id="growthChart"></canvas></div>
+        <div class='card'><h2>Status Funnel</h2><canvas id="statusChart"></canvas></div>
+        <div class='card'><h2>Revenue by Subject</h2><canvas id="revSubChart"></canvas></div>
+        <div class='card'><h2>Multi-subject Behaviour</h2><canvas id="multiChart"></canvas></div>
+        <div class='card'><h2>Students per Grade</h2><canvas id="gradeChart"></canvas></div>
+        <div class='card'><h2>Students per Province</h2><canvas id="provChart"></canvas></div>
     </section>
-
-    <!-- TABLE -->
-    <div class='card'>
-        <h2>Subject Performance</h2>
-        <div class="scroll-x">
-            <table>
-                <thead>
-                    <tr><th>Subject</th><th>Active students</th><th>Attendance rows</th></tr>
-                </thead>
-                <tbody>{''.join(rows)}</tbody>
-            </table>
-        </div>
-    </div>
 
     <script>
-    new Chart(revChart, {{
+    new Chart(growthChart, {{
         type:'line',
-        data:{{ labels:{json.dumps(rev_labels)},
-        datasets:[{{label:'Revenue',data:{json.dumps(rev_data)}}}] }}
-    }});
-
-    new Chart(studentChart, {{
-        type:'pie',
-        data:{{ labels:['New','Returning'],
-        datasets:[{{data:[{new_students},{returning}]}}] }}
+        data:{{ labels:{json.dumps(growth_labels)},
+        datasets:[{{label:'Enrollments',data:{json.dumps(growth_data)}}}] }}
     }});
 
     new Chart(statusChart, {{
@@ -5746,16 +5742,33 @@ def admin_analytics():
         datasets:[{{data:[{pending},{active},{lapsed}]}}] }}
     }});
 
-    new Chart(attChart, {{
-        type:'line',
-        data:{{ labels:{json.dumps(att_labels)},
-        datasets:[{{label:'Attendance',data:{json.dumps(att_data)}}}] }}
+    new Chart(revSubChart, {{
+        type:'bar',
+        data:{{ labels:{json.dumps(revsub_labels)},
+        datasets:[{{label:'Revenue',data:{json.dumps(revsub_data)}}}] }}
+    }});
+
+    new Chart(multiChart, {{
+        type:'pie',
+        data:{{ labels:{json.dumps(multi_labels)},
+        datasets:[{{data:{json.dumps(multi_data)}}}] }}
+    }});
+
+    new Chart(gradeChart, {{
+        type:'bar',
+        data:{{ labels:{json.dumps(grade_labels)},
+        datasets:[{{data:{json.dumps(grade_data)}}}] }}
+    }});
+
+    new Chart(provChart, {{
+        type:'bar',
+        data:{{ labels:{json.dumps(prov_labels)},
+        datasets:[{{data:{json.dumps(prov_data)}}}] }}
     }});
     </script>
     """
 
     return page("Analytics Dashboard", body)
-
 
 
 
