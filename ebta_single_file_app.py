@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import datetime
 import calendar
@@ -1750,7 +1751,7 @@ def page(title, body_html, extra_head="", extra_js=""):
     </script>
 
 
-
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     {GOOGLE_FONTS}{BASE_CSS}{BASE_JS}{extra_head}
     </head><body>
@@ -1783,6 +1784,8 @@ def page(title, body_html, extra_head="", extra_js=""):
     </footer>{extra_js}
     </body></html>
     """
+
+
 # ===================== File routes ==============
 @app.route('/uploads/<path:filename>')
 def uploads(filename): return send_from_directory(UPLOAD_DIR, filename)
@@ -4424,6 +4427,7 @@ def admin_enrollments():
 
     return page("Enrollments", body)
 
+
 @app.post('/admin/enrollments/<int:id>/<action>')
 def enrollment_action(id: int, action: str):
     r = require_admin()
@@ -5598,6 +5602,7 @@ def admin_send_dm():
 
 # --- Admin: Analytics dashboard ---
 
+
 @app.get('/admin/analytics')
 def admin_analytics():
     r = require_admin()
@@ -5605,58 +5610,131 @@ def admin_analytics():
     month = get_admin_active_month()
     conn = get_db(); cur = conn.cursor()
 
-    # High-level: enrollments by status
-    cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=?", (month,)); total = cur.fetchone()['c']
+    # High-level stats
+    cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=?", (month,))
+    total = cur.fetchone()['c']
+
     def count_status(s):
         cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=? AND status=?", (month,s))
         return cur.fetchone()['c']
-    pending, active, lapsed = count_status('PENDING'), count_status('ACTIVE'), count_status('LAPSED')
 
-    # Per subject aggregates (attendance, submissions, marks, ratings)
+    pending = count_status('PENDING')
+    active  = count_status('ACTIVE')
+    lapsed  = count_status('LAPSED')
+
+    # Revenue
+    cur.execute("""
+        SELECT SUM(amount_paid) AS r 
+        FROM enrollments 
+        WHERE month=? AND status='ACTIVE'
+    """, (month,))
+    revenue = cur.fetchone()['r'] or 0
+
+    # Returning students
+    cur.execute("""
+        SELECT COUNT(DISTINCT student_id)
+        FROM enrollments
+        WHERE month=? AND status='ACTIVE'
+        AND student_id IN (
+            SELECT student_id FROM enrollments WHERE month < ?
+        )
+    """, (month, month))
+    returning = cur.fetchone()[0] or 0
+
+    # New students
+    cur.execute("""
+        SELECT COUNT(DISTINCT student_id)
+        FROM enrollments
+        WHERE month=? AND status='ACTIVE'
+        AND student_id NOT IN (
+            SELECT student_id FROM enrollments WHERE month < ?
+        )
+    """, (month, month))
+    new_students = cur.fetchone()[0] or 0
+
+    # Revenue trend (for chart)
+    cur.execute("""
+        SELECT substr(created_at,1,10) AS day, SUM(amount_paid) AS r
+        FROM enrollments
+        WHERE month=? AND status='ACTIVE'
+        GROUP BY day ORDER BY day
+    """, (month,))
+    rev_rows = cur.fetchall()
+
+    rev_labels = json.dumps([r['day'] for r in rev_rows])
+    rev_data   = json.dumps([r['r'] for r in rev_rows])
+
+    # Subject analytics
     cur.execute("SELECT id, name, grade FROM subjects ORDER BY grade, name")
-    subs = cur.fetchall()
+    subjects = cur.fetchall()
 
     rows = []
-    for s in subs:
+    for s in subjects:
         # active students
-        cur.execute("""SELECT COUNT(*) AS c FROM enrollments 
-                    WHERE subject_id=? AND month=? AND status='ACTIVE'""", (s['id'], month))
+        cur.execute("""
+            SELECT COUNT(*) AS c 
+            FROM enrollments 
+            WHERE subject_id=? AND month=? AND status='ACTIVE'
+        """, (s['id'], month))
         active_students = cur.fetchone()['c'] or 0
 
         # sessions recorded days
-        cur.execute("""SELECT COUNT(DISTINCT a.date) AS d
-                    FROM attendance a JOIN sessions se ON se.id=a.session_id
-                    WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?""", (s['id'], month))
+        cur.execute("""
+            SELECT COUNT(DISTINCT a.date) AS d
+            FROM attendance a 
+            JOIN sessions se ON se.id=a.session_id
+            WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?
+        """, (s['id'], month))
         days = cur.fetchone()['d'] or 0
 
         # total attendance rows
-        cur.execute("""SELECT COUNT(*) AS c
-                    FROM attendance a JOIN sessions se ON se.id=a.session_id
-                    WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?""", (s['id'], month))
+        cur.execute("""
+            SELECT COUNT(*) AS c
+            FROM attendance a 
+            JOIN sessions se ON se.id=a.session_id
+            WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?
+        """, (s['id'], month))
         att_rows = cur.fetchone()['c'] or 0
-        # overall attendance rate: present count over (days * active_students)
-        att_rate = (int(round((att_rows / (days*active_students))*100)) if days>0 and active_students>0 else 0)
 
-        # assignments this month
-        cur.execute("""SELECT COUNT(*) AS c FROM materials 
-                    WHERE subject_id=? AND month=? AND (is_assignment=1 OR kind='assignment')""", (s['id'], month))
+        att_rate = (
+            int(round((att_rows / (days*active_students))*100))
+            if days>0 and active_students>0 else 0
+        )
+
+        # assignments
+        cur.execute("""
+            SELECT COUNT(*) AS c 
+            FROM materials 
+            WHERE subject_id=? AND month=? 
+            AND (is_assignment=1 OR kind='assignment')
+        """, (s['id'], month))
         asg_count = cur.fetchone()['c'] or 0
 
         # submissions + avg mark
-        cur.execute("""SELECT COUNT(*) AS c, AVG(sub.mark) AS avgm
-                    FROM submissions sub JOIN materials m ON m.id=sub.material_id
-                    WHERE m.subject_id=? AND m.month=? AND (m.is_assignment=1 OR m.kind='assignment')""", (s['id'], month))
-        subrow = cur.fetchone(); submissions = subrow['c'] or 0; avgm = subrow['avgm']
+        cur.execute("""
+            SELECT COUNT(*) AS c, AVG(sub.mark) AS avgm
+            FROM submissions sub 
+            JOIN materials m ON m.id=sub.material_id
+            WHERE m.subject_id=? AND m.month=? 
+            AND (m.is_assignment=1 OR m.kind='assignment')
+        """, (s['id'], month))
+        subrow = cur.fetchone()
+        submissions = subrow['c'] or 0
+        avgm = subrow['avgm']
         avgm_txt = "-" if avgm is None else f"{int(round(avgm))}"
 
-        # submission completion: divide by (#assignments * #active_students)
         denom = (asg_count * active_students) if asg_count and active_students else 0
         completion = int(round((submissions/denom)*100)) if denom else 0
 
-        # ratings avg
-        cur.execute("""SELECT AVG(rating) AS r, COUNT(*) AS n
-                    FROM lesson_ratings WHERE subject_id=? AND month=?""", (s['id'], month))
-        rrow = cur.fetchone(); rating_avg = (round(rrow['r'],1) if rrow['r'] else None); rating_n = rrow['n'] or 0
+        # ratings
+        cur.execute("""
+            SELECT AVG(rating) AS r, COUNT(*) AS n
+            FROM lesson_ratings 
+            WHERE subject_id=? AND month=?
+        """, (s['id'], month))
+        rrow = cur.fetchone()
+        rating_avg = (round(rrow['r'],1) if rrow['r'] else None)
+        rating_n = rrow['n'] or 0
         rating_txt = "—" if rating_avg is None else f"{rating_avg} ★ ({rating_n})"
 
         rows.append(f"""
@@ -5678,34 +5756,70 @@ def admin_analytics():
     <div class="scroll-x">
         <table>
             <thead>
-            <tr>
-                <th>Subject</th><th>Active</th><th>Attendance</th>
-                <th>#Assign</th><th>#Submissions</th><th>Completion</th>
-                <th>Avg mark</th><th>Rating</th>
-            </tr>
+                <tr>
+                    <th>Subject</th>
+                    <th>Active</th>
+                    <th>Attendance</th>
+                    <th>#Assign</th>
+                    <th>#Submissions</th>
+                    <th>Completion</th>
+                    <th>Avg mark</th>
+                    <th>Rating</th>
+                </tr>
             </thead>
-            <tbody>{''.join(rows) if rows else "<tr><td colspan='8'><div class='empty'>No data.</div></td></tr>"}</tbody>
+            <tbody>
+                {''.join(rows) if rows else "<tr><td colspan='8'><div class='empty'>No data.</div></td></tr>"}
+            </tbody>
         </table>
     </div>
     """
 
     body = f"""
     {admin_nav()}
+
     <section class='grid'>
         <div class='stats'>
-        {stat('Current month', month)}
-        {stat('Enrollments', total)}
-        {stat('Pending', pending)}
-        {stat('Active', active)}
-        {stat('Lapsed', lapsed)}
+            {stat('Revenue', f'R{revenue}')}
+            {stat('New students', new_students)}
+            {stat('Returning', returning)}
+            {stat('Active', active)}
+            {stat('Lapsed', lapsed)}
         </div>
-        <div class='card'><h1>Subject Analytics — {month}</h1>
-        <p class='muted mini'>Completion = submissions ÷ (assignments × active students). Ratings are learner feedback captured between the 24th and month end.</p>
-        {table}
+
+        <div class='card'>
+            <h2>Revenue Trend — {month}</h2>
+            <canvas id="revChart"></canvas>
+        </div>
+
+        <div class='card'>
+            <h2>Subject Analytics</h2>
+            <p class='muted mini'>
+                Completion = submissions ÷ (assignments × active students)
+            </p>
+            {table}
         </div>
     </section>
+
+    <script>
+    new Chart(document.getElementById('revChart'), {{
+        type: 'line',
+        data: {{
+            labels: {rev_labels},
+            datasets: [{{
+                label: 'Revenue (R)',
+                data: {rev_data},
+                borderWidth: 2,
+                fill: true
+            }}]
+        }}
+    }});
+    </script>
     """
+
     return page("Analytics", body)
+
+
+
 
 # --- Export remove list ---
 
