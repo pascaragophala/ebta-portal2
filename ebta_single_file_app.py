@@ -5601,6 +5601,8 @@ def admin_send_dm():
     return redirect(url_for('admin_direct_messages'))
 
 # --- Admin: Analytics dashboard ---
+import json
+
 @app.get('/admin/analytics')
 def admin_analytics():
     r = require_admin()
@@ -5700,6 +5702,21 @@ def admin_analytics():
         </tr>
         """)
 
+    # ================= REVENUE PER SUBJECT =================
+    cur.execute("""
+        SELECT sub.name || ' (' || sub.grade || ')' AS label,
+               SUM(e.amount_paid) AS r
+        FROM enrollments e
+        JOIN subjects sub ON sub.id = e.subject_id
+        WHERE e.status='ACTIVE' AND e.month=?
+        GROUP BY sub.id
+        ORDER BY r DESC
+    """, (month,))
+    rev_sub_rows = cur.fetchall()
+
+    rev_sub_labels = [r['label'] for r in rev_sub_rows]
+    rev_sub_data = [r['r'] for r in rev_sub_rows]
+
     conn.close()
 
     # ================= PAGE BODY =================
@@ -5734,6 +5751,18 @@ def admin_analytics():
         <div class='card'><h2>Attendance Trend</h2><canvas id="attChart"></canvas></div>
     </section>
 
+    <section class='card'>
+        <div style="display:flex;justify-content:space-between">
+            <h2>Revenue per Subject</h2>
+            <select id="revSubFilter" onchange="updateRevSubChart()">
+                <option value="3">Top 3</option>
+                <option value="10">Top 10</option>
+                <option value="all">All</option>
+            </select>
+        </div>
+        <canvas id="revSubChart"></canvas>
+    </section>
+
     <div class='card'>
         <h2>Subject Performance</h2>
         <div class="scroll-x">
@@ -5748,6 +5777,8 @@ def admin_analytics():
 
 <script>
 const revenueData = {json.dumps(rev_data_sets)};
+const revSubLabels = {json.dumps(rev_sub_labels)};
+const revSubData = {json.dumps(rev_sub_data)};
 
 let revChart = new Chart(revTrendChart, {{
   type:'line',
@@ -5779,10 +5810,33 @@ new Chart(attChart, {{
   data:{{ labels:{json.dumps(att_labels)},
           datasets:[{{label:'Attendance',data:{json.dumps(att_data)}}}] }}
 }});
+
+let revSubChart = new Chart(revSubChart, {{
+  type:'bar',
+  data:{{ labels: revSubLabels,
+          datasets:[{{label:'Revenue', data: revSubData}}] }}
+}});
+
+function updateRevSubChart(){{
+  const mode = document.getElementById("revSubFilter").value;
+  let labels = revSubLabels;
+  let data = revSubData;
+
+  if(mode !== "all"){{
+    const n = parseInt(mode);
+    labels = labels.slice(0,n);
+    data = data.slice(0,n);
+  }}
+
+  revSubChart.data.labels = labels;
+  revSubChart.data.datasets[0].data = data;
+  revSubChart.update();
+}}
 </script>
     """
 
     return page("Analytics Dashboard", body)
+    
     
 # --- Export remove list ---
 
