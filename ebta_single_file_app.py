@@ -5601,7 +5601,6 @@ def admin_send_dm():
     return redirect(url_for('admin_direct_messages'))
 
 # --- Admin: Analytics dashboard ---
-
 @app.get('/admin/analytics')
 def admin_analytics():
     r = require_admin()
@@ -5611,7 +5610,7 @@ def admin_analytics():
     conn = get_db()
     cur = conn.cursor()
 
-    # --- KPI ---
+    # ===== KPI =====
     cur.execute("SELECT COUNT(*) FROM enrollments WHERE month=?", (month,))
     total = cur.fetchone()[0] or 0
 
@@ -5629,7 +5628,7 @@ def admin_analytics():
     avg_payment = int(revenue / active) if active else 0
     conversion = int((active / total) * 100) if total else 0
 
-    # --- New vs Returning ---
+    # ===== New vs Returning =====
     cur.execute("""
         SELECT COUNT(DISTINCT student_id)
         FROM enrollments
@@ -5646,7 +5645,7 @@ def admin_analytics():
     """, (month, month))
     returning = cur.fetchone()[0] or 0
 
-    # --- Enrollments per day ---
+    # ===== Growth per day =====
     cur.execute("""
         SELECT substr(created_at,1,10) AS day, COUNT(*) AS c
         FROM enrollments
@@ -5657,7 +5656,7 @@ def admin_analytics():
     growth_labels = [r['day'] for r in growth]
     growth_data = [r['c'] for r in growth]
 
-    # --- Revenue per subject ---
+    # ===== Revenue per subject =====
     cur.execute("""
         SELECT sub.name, SUM(e.amount_paid) AS r
         FROM enrollments e
@@ -5670,7 +5669,7 @@ def admin_analytics():
     revsub_labels = [r['name'] for r in revsub]
     revsub_data = [r['r'] for r in revsub]
 
-    # --- Students per grade ---
+    # ===== Students per grade =====
     cur.execute("""
         SELECT grade, COUNT(*) AS c
         FROM students
@@ -5680,7 +5679,7 @@ def admin_analytics():
     grade_labels = [grade_label(r['grade']) for r in grades]
     grade_data = [r['c'] for r in grades]
 
-    # --- Students per province ---
+    # ===== Students per province =====
     cur.execute("""
         SELECT province, COUNT(*) AS c
         FROM students
@@ -5691,7 +5690,7 @@ def admin_analytics():
     prov_labels = [r['province'] for r in prov]
     prov_data = [r['c'] for r in prov]
 
-    # --- Multi-subject behaviour ---
+    # ===== Multi-subject behaviour =====
     cur.execute("""
         SELECT subjects_count, COUNT(*) AS c FROM (
             SELECT student_id, COUNT(*) AS subjects_count
@@ -5706,6 +5705,40 @@ def admin_analytics():
     multi_labels = [str(r['subjects_count'])+" subjects" for r in multi]
     multi_data = [r['c'] for r in multi]
 
+    # ===== Attendance trend =====
+    cur.execute("""
+        SELECT a.date, COUNT(*) AS c
+        FROM attendance a
+        WHERE strftime('%Y-%m', a.date)=?
+        GROUP BY a.date ORDER BY a.date
+    """, (month,))
+    att = cur.fetchall()
+    att_labels = [r['date'] for r in att]
+    att_data = [r['c'] for r in att]
+
+    # ===== Subject table =====
+    cur.execute("SELECT id,name,grade FROM subjects ORDER BY grade,name")
+    subs = cur.fetchall()
+    rows=[]
+    for s in subs:
+        cur.execute("SELECT COUNT(*) FROM enrollments WHERE subject_id=? AND month=? AND status='ACTIVE'", (s['id'], month))
+        active_students = cur.fetchone()[0] or 0
+
+        cur.execute("""
+            SELECT COUNT(*) FROM attendance a
+            JOIN sessions se ON se.id=a.session_id
+            WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?
+        """, (s['id'], month))
+        attc = cur.fetchone()[0] or 0
+
+        rows.append(f"""
+        <tr>
+            <td>{grade_label(s['grade'])} — {s['name']}</td>
+            <td>{active_students}</td>
+            <td>{attc}</td>
+        </tr>
+        """)
+
     conn.close()
 
     body = f"""
@@ -5716,18 +5749,31 @@ def admin_analytics():
         {stat('Enrollments', total)}
         {stat('Active', active)}
         {stat('Conversion', f'{conversion}%')}
-        {stat('Avg Payment', f'R{avg_payment}')}
+        {stat('Avg payment', f'R{avg_payment}')}
         {stat('Returning', returning)}
     </section>
 
     <section class='grid'>
-        <div class='card'><h2>Growth</h2><canvas id="growthChart"></canvas></div>
+        <div class='card'><h2>Enrollment Growth</h2><canvas id="growthChart"></canvas></div>
         <div class='card'><h2>Status Funnel</h2><canvas id="statusChart"></canvas></div>
         <div class='card'><h2>Revenue by Subject</h2><canvas id="revSubChart"></canvas></div>
         <div class='card'><h2>Multi-subject Behaviour</h2><canvas id="multiChart"></canvas></div>
         <div class='card'><h2>Students per Grade</h2><canvas id="gradeChart"></canvas></div>
         <div class='card'><h2>Students per Province</h2><canvas id="provChart"></canvas></div>
+        <div class='card'><h2>Attendance Trend</h2><canvas id="attChart"></canvas></div>
     </section>
+
+    <div class='card'>
+        <h2>Subject Performance</h2>
+        <div class="scroll-x">
+            <table>
+                <thead>
+                    <tr><th>Subject</th><th>Active students</th><th>Attendance rows</th></tr>
+                </thead>
+                <tbody>{''.join(rows)}</tbody>
+            </table>
+        </div>
+    </div>
 
     <script>
     new Chart(growthChart, {{
@@ -5765,12 +5811,16 @@ def admin_analytics():
         data:{{ labels:{json.dumps(prov_labels)},
         datasets:[{{data:{json.dumps(prov_data)}}}] }}
     }});
+
+    new Chart(attChart, {{
+        type:'line',
+        data:{{ labels:{json.dumps(att_labels)},
+        datasets:[{{label:'Attendance',data:{json.dumps(att_data)}}}] }}
+    }});
     </script>
     """
 
     return page("Analytics Dashboard", body)
-
-
 
 # --- Export remove list ---
 
