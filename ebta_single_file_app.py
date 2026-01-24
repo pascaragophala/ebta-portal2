@@ -5650,7 +5650,7 @@ def admin_analytics():
     """, (month, month))
     returning = cur.fetchone()[0] or 0
 
-    # ===== Revenue trend (per day, current month) =====
+    # ===== Revenue trend (per selected month, per day) =====
     cur.execute("""
         SELECT substr(created_at,1,10) AS day, SUM(amount_paid) AS r
         FROM enrollments
@@ -5660,39 +5660,6 @@ def admin_analytics():
     rev_rows = cur.fetchall()
     rev_labels = [r['day'] for r in rev_rows]
     rev_data = [r['r'] for r in rev_rows]
-
-    # ===== Revenue trend (week) =====
-    cur.execute("""
-        SELECT strftime('%Y-W%W', created_at) AS label, SUM(amount_paid) AS r
-        FROM enrollments
-        WHERE status='ACTIVE'
-        GROUP BY label ORDER BY label
-    """)
-    rev_week_rows = cur.fetchall()
-    rev_week_labels = [r['label'] for r in rev_week_rows]
-    rev_week_data = [r['r'] for r in rev_week_rows]
-
-    # ===== Revenue trend (month) =====
-    cur.execute("""
-        SELECT substr(created_at,1,7) AS label, SUM(amount_paid) AS r
-        FROM enrollments
-        WHERE status='ACTIVE'
-        GROUP BY label ORDER BY label
-    """)
-    rev_month_rows = cur.fetchall()
-    rev_month_labels = [r['label'] for r in rev_month_rows]
-    rev_month_data = [r['r'] for r in rev_month_rows]
-
-    # ===== Revenue trend (year) =====
-    cur.execute("""
-        SELECT substr(created_at,1,4) AS label, SUM(amount_paid) AS r
-        FROM enrollments
-        WHERE status='ACTIVE'
-        GROUP BY label ORDER BY label
-    """)
-    rev_year_rows = cur.fetchall()
-    rev_year_labels = [r['label'] for r in rev_year_rows]
-    rev_year_data = [r['r'] for r in rev_year_rows]
 
     # ===== Attendance trend =====
     cur.execute("""
@@ -5770,13 +5737,8 @@ def admin_analytics():
 
     <section class='grid'>
         <div class='card'>
-            <h2>Revenue Trend</h2>
-            <select id="revFilter" onchange="updateRevenueTrend()">
-                <option value="day">Per day</option>
-                <option value="week">Per week</option>
-                <option value="month">Per month</option>
-                <option value="year">Per year</option>
-            </select>
+            <h2>Revenue Trend — {month}</h2>
+            <p class="mini muted">Daily revenue for the selected month</p>
             <canvas id="revChart"></canvas>
         </div>
 
@@ -5822,31 +5784,67 @@ def admin_analytics():
     <script>
     const revLabels = {json.dumps(rev_labels)};
     const revData = {json.dumps(rev_data)};
-    const revWeekLabels = {json.dumps(rev_week_labels)};
-    const revWeekData = {json.dumps(rev_week_data)};
-    const revMonthLabels = {json.dumps(rev_month_labels)};
-    const revMonthData = {json.dumps(rev_month_data)};
-    const revYearLabels = {json.dumps(rev_year_labels)};
-    const revYearData = {json.dumps(rev_year_data)};
+    const attLabels = {json.dumps(att_labels)};
+    const attData = {json.dumps(att_data)};
+    const revSubLabels = {json.dumps(rev_sub_labels)};
+    const revSubData = {json.dumps(rev_sub_data)};
+    const tutorLabels = {json.dumps(tutor_labels)};
+    const tutorData = {json.dumps(tutor_data)};
 
-    let revChartObj = new Chart(document.getElementById("revChart"), {{
+    new Chart(document.getElementById("revChart"), {{
         type:'line',
         data:{{labels:revLabels,datasets:[{{label:'Revenue',data:revData}}]}}
     }});
 
-    function updateRevenueTrend(){{
-        const mode = document.getElementById("revFilter").value;
-        if(mode==="day"){{revChartObj.data.labels=revLabels;revChartObj.data.datasets[0].data=revData;}}
-        if(mode==="week"){{revChartObj.data.labels=revWeekLabels;revChartObj.data.datasets[0].data=revWeekData;}}
-        if(mode==="month"){{revChartObj.data.labels=revMonthLabels;revChartObj.data.datasets[0].data=revMonthData;}}
-        if(mode==="year"){{revChartObj.data.labels=revYearLabels;revChartObj.data.datasets[0].data=revYearData;}}
-        revChartObj.update();
+    new Chart(document.getElementById("studentChart"), {{
+        type:'pie',
+        data:{{labels:['New','Returning'],datasets:[{{data:[{new_students},{returning}]}}]}}
+    }});
+
+    new Chart(document.getElementById("statusChart"), {{
+        type:'bar',
+        data:{{labels:['Pending','Active','Lapsed'],datasets:[{{data:[{pending},{active},{lapsed}]}}]}}
+    }});
+
+    new Chart(document.getElementById("attChart"), {{
+        type:'line',
+        data:{{labels:attLabels,datasets:[{{label:'Attendance',data:attData}}]}}
+    }});
+
+    const revSubCtx = document.getElementById("revSubChart").getContext("2d");
+    let revSubChartObj = new Chart(revSubCtx, {{
+        type:'bar',
+        data:{{labels:revSubLabels,datasets:[{{label:'Revenue',data:revSubData}}]}}
+    }});
+
+    function updateRevSubChart(){{
+        const mode = document.getElementById("revSubFilter").value;
+        let l = revSubLabels, d = revSubData;
+        if(mode !== "all"){{ l=l.slice(0,mode); d=d.slice(0,mode); }}
+        revSubChartObj.data.labels = l;
+        revSubChartObj.data.datasets[0].data = d;
+        revSubChartObj.update();
+    }}
+
+    const tutorCtx = document.getElementById("tutorChart").getContext("2d");
+    let tutorChartObj = new Chart(tutorCtx, {{
+        type:'bar',
+        data:{{labels:tutorLabels,datasets:[{{label:'Avg ★',data:tutorData}}]}}
+    }});
+
+    function updateTutorChart(){{
+        const mode = document.getElementById("tutorFilter").value;
+        let l = tutorLabels, d = tutorData;
+        if(mode !== "all"){{ l=l.slice(0,mode); d=d.slice(0,mode); }}
+        tutorChartObj.data.labels = l;
+        tutorChartObj.data.datasets[0].data = d;
+        tutorChartObj.update();
     }}
     </script>
     """
 
     return page("Analytics Dashboard", body)
-  
+ 
 # --- Export remove list ---
 
 @app.get('/api/export/remove-list')
