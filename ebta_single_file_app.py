@@ -3368,6 +3368,7 @@ def student_home():
     return page("Student Portal", body)
 
 
+
 @app.post('/student/set-month')
 def student_set_month():
     r = require_student()
@@ -5601,7 +5602,6 @@ def admin_send_dm():
     return redirect(url_for('admin_direct_messages'))
 
 # --- Admin: Analytics dashboard ---
-import json
 
 @app.get('/admin/analytics')
 def admin_analytics():
@@ -5713,9 +5713,26 @@ def admin_analytics():
         ORDER BY r DESC
     """, (month,))
     rev_sub_rows = cur.fetchall()
-
     rev_sub_labels = [r['label'] for r in rev_sub_rows]
     rev_sub_data = [r['r'] for r in rev_sub_rows]
+
+    # ================= TOP RATED TUTORS =================
+    cur.execute("""
+        SELECT t.full_name AS label,
+               ROUND(AVG(lr.rating),2) AS avg_rating,
+               COUNT(lr.rating) AS n
+        FROM lesson_ratings lr
+        JOIN subjects s ON s.id = lr.subject_id
+        JOIN sessions se ON se.subject_id = s.id
+        JOIN tutors t ON t.id = se.tutor_id
+        WHERE lr.month=?
+        GROUP BY t.id
+        ORDER BY avg_rating DESC
+    """, (month,))
+    tutor_rows = cur.fetchall()
+
+    tutor_labels = [f"{r['label']} ({r['n']})" for r in tutor_rows]
+    tutor_data = [r['avg_rating'] for r in tutor_rows]
 
     conn.close()
 
@@ -5763,6 +5780,19 @@ def admin_analytics():
         <canvas id="revSubChart"></canvas>
     </section>
 
+    <section class='card'>
+        <div style="display:flex;justify-content:space-between">
+            <h2>Top Rated Tutors (avg ★)</h2>
+            <select id="tutorFilter" onchange="updateTutorChart()">
+                <option value="3">Top 3</option>
+                <option value="5">Top 5</option>
+                <option value="10">Top 10</option>
+                <option value="all">All</option>
+            </select>
+        </div>
+        <canvas id="tutorChart"></canvas>
+    </section>
+
     <div class='card'>
         <h2>Subject Performance</h2>
         <div class="scroll-x">
@@ -5779,6 +5809,8 @@ def admin_analytics():
 const revenueData = {json.dumps(rev_data_sets)};
 const revSubLabels = {json.dumps(rev_sub_labels)};
 const revSubData = {json.dumps(rev_sub_data)};
+const tutorLabels = {json.dumps(tutor_labels)};
+const tutorData = {json.dumps(tutor_data)};
 
 let revChart = new Chart(revTrendChart, {{
   type:'line',
@@ -5821,23 +5853,32 @@ function updateRevSubChart(){{
   const mode = document.getElementById("revSubFilter").value;
   let labels = revSubLabels;
   let data = revSubData;
-
-  if(mode !== "all"){{
-    const n = parseInt(mode);
-    labels = labels.slice(0,n);
-    data = data.slice(0,n);
-  }}
-
+  if(mode !== "all"){{ labels = labels.slice(0,mode); data = data.slice(0,mode); }}
   revSubChart.data.labels = labels;
   revSubChart.data.datasets[0].data = data;
   revSubChart.update();
 }}
+
+let tutorChart = new Chart(tutorChart, {{
+  type:'bar',
+  data:{{ labels: tutorLabels,
+          datasets:[{{label:'Avg rating', data: tutorData}}] }}
+}});
+
+function updateTutorChart(){{
+  const mode = document.getElementById("tutorFilter").value;
+  let labels = tutorLabels;
+  let data = tutorData;
+  if(mode !== "all"){{ labels = labels.slice(0,mode); data = data.slice(0,mode); }}
+  tutorChart.data.labels = labels;
+  tutorChart.data.datasets[0].data = data;
+  tutorChart.update();
+}}
 </script>
     """
 
-    return page("Analytics Dashboard", body)
-    
-    
+    return page("Analytics Dashboard", body) 
+  
 # --- Export remove list ---
 
 @app.get('/api/export/remove-list')
