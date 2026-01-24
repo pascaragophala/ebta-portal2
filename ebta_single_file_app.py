@@ -5614,22 +5614,22 @@ def admin_analytics():
     conn = get_db()
     cur = conn.cursor()
 
-    # ===== KPIs =====
-    cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=?", (month,))
-    total = cur.fetchone()['c'] or 0
+    # ================= KPIs =================
+    cur.execute("SELECT COUNT(*) FROM enrollments WHERE month=?", (month,))
+    total = cur.fetchone()[0] or 0
 
     def count_status(s):
-        cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=? AND status=?", (month,s))
-        return cur.fetchone()['c'] or 0
+        cur.execute("SELECT COUNT(*) FROM enrollments WHERE month=? AND status=?", (month,s))
+        return cur.fetchone()[0] or 0
 
     pending = count_status('PENDING')
     active = count_status('ACTIVE')
     lapsed = count_status('LAPSED')
 
-    cur.execute("SELECT SUM(amount_paid) AS r FROM enrollments WHERE month=? AND status='ACTIVE'", (month,))
-    revenue = cur.fetchone()['r'] or 0
+    cur.execute("SELECT SUM(amount_paid) FROM enrollments WHERE month=? AND status='ACTIVE'", (month,))
+    revenue = cur.fetchone()[0] or 0
 
-    # ===== New vs Returning =====
+    # ================= New vs Returning =================
     cur.execute("""
         SELECT COUNT(DISTINCT student_id)
         FROM enrollments
@@ -5650,107 +5650,72 @@ def admin_analytics():
     """, (month, month))
     returning = cur.fetchone()[0] or 0
 
-    # ===== Revenue datasets =====
+    # ================= Revenue datasets =================
+    def fetch(q):
+        cur.execute(q)
+        rows = cur.fetchall()
+        return [r[0] for r in rows], [r[1] for r in rows]
 
-    # Per day (current month)
-    cur.execute("""
-        SELECT substr(created_at,1,10) AS label, SUM(amount_paid) AS v
+    day_labels, day_data = fetch("""
+        SELECT substr(created_at,1,10), SUM(amount_paid)
         FROM enrollments
         WHERE month=? AND status='ACTIVE'
-        GROUP BY label ORDER BY label
-    """, (month,))
-    day_rows = cur.fetchall()
+        GROUP BY 1 ORDER BY 1
+    """.replace("?", f"'{month}'"))
 
-    # Last 8 weeks
-    cur.execute("""
-        SELECT strftime('%Y-W%W', created_at) AS label, SUM(amount_paid) AS v
-        FROM enrollments
-        WHERE status='ACTIVE'
-        GROUP BY label ORDER BY label DESC LIMIT 8
+    week_labels, week_data = fetch("""
+        SELECT strftime('%Y-W%W', created_at), SUM(amount_paid)
+        FROM enrollments WHERE status='ACTIVE'
+        GROUP BY 1 ORDER BY 1
     """)
-    week_rows = cur.fetchall()[::-1]
 
-    # Last 12 months
-    cur.execute("""
-        SELECT substr(created_at,1,7) AS label, SUM(amount_paid) AS v
-        FROM enrollments
-        WHERE status='ACTIVE'
-        GROUP BY label ORDER BY label DESC LIMIT 12
+    month_labels, month_data = fetch("""
+        SELECT substr(created_at,1,7), SUM(amount_paid)
+        FROM enrollments WHERE status='ACTIVE'
+        GROUP BY 1 ORDER BY 1
     """)
-    month_rows = cur.fetchall()[::-1]
 
-    # Per year
-    cur.execute("""
-        SELECT substr(created_at,1,4) AS label, SUM(amount_paid) AS v
-        FROM enrollments
-        WHERE status='ACTIVE'
-        GROUP BY label ORDER BY label
+    year_labels, year_data = fetch("""
+        SELECT substr(created_at,1,4), SUM(amount_paid)
+        FROM enrollments WHERE status='ACTIVE'
+        GROUP BY 1 ORDER BY 1
     """)
-    year_rows = cur.fetchall()
 
-    # Past 30 days
+    # ================= Attendance =================
     cur.execute("""
-        SELECT substr(created_at,1,10) AS label, SUM(amount_paid) AS v
-        FROM enrollments
-        WHERE status='ACTIVE'
-        AND date(created_at) >= date('now','-30 days')
-        GROUP BY label ORDER BY label
-    """)
-    last30_rows = cur.fetchall()
-
-    # ===== Attendance =====
-    cur.execute("""
-        SELECT a.date AS label, COUNT(*) AS v
+        SELECT a.date, COUNT(*)
         FROM attendance a
         WHERE strftime('%Y-%m', a.date)=?
-        GROUP BY a.date ORDER BY a.date
+        GROUP BY 1 ORDER BY 1
     """, (month,))
     att_rows = cur.fetchall()
+    att_labels = [r[0] for r in att_rows]
+    att_data = [r[1] for r in att_rows]
 
-    # ===== Revenue per subject =====
+    # ================= Revenue per subject =================
     cur.execute("""
-        SELECT s.name || ' (' || s.grade || ')' AS label, SUM(e.amount_paid) AS v
+        SELECT s.name || ' (' || s.grade || ')', SUM(e.amount_paid)
         FROM enrollments e
         JOIN subjects s ON s.id=e.subject_id
         WHERE e.month=? AND e.status='ACTIVE'
-        GROUP BY s.id
-        ORDER BY v DESC
+        GROUP BY s.id ORDER BY 2 DESC
     """, (month,))
     rev_sub_rows = cur.fetchall()
+    rev_sub_labels = [r[0] for r in rev_sub_rows]
+    rev_sub_data = [r[1] for r in rev_sub_rows]
 
-    # ===== Top rated tutors =====
+    # ================= Top tutors =================
     cur.execute("""
-        SELECT t.full_name AS label, ROUND(AVG(l.rating),2) AS v
+        SELECT t.full_name, ROUND(AVG(l.rating),2)
         FROM lesson_ratings l
         JOIN tutor_subjects ts ON ts.subject_id=l.subject_id
         JOIN tutors t ON t.id=ts.tutor_id
         WHERE l.month=?
-        GROUP BY t.id
-        ORDER BY v DESC
+        GROUP BY t.id ORDER BY 2 DESC
     """, (month,))
     tutor_rows = cur.fetchall()
-
-    # ===== Subject table =====
-    cur.execute("SELECT id,name,grade FROM subjects ORDER BY grade,name")
-    subs = cur.fetchall()
-
-    rows=[]
-    for s in subs:
-        cur.execute("SELECT COUNT(*) FROM enrollments WHERE subject_id=? AND month=? AND status='ACTIVE'", (s['id'], month))
-        active_students = cur.fetchone()[0] or 0
-
-        cur.execute("""SELECT COUNT(*) FROM attendance a
-                       JOIN sessions se ON se.id=a.session_id
-                       WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?""", (s['id'], month))
-        att = cur.fetchone()[0] or 0
-
-        rows.append(f"""
-        <tr>
-            <td>{grade_label(s['grade'])} — {s['name']}</td>
-            <td>{active_students}</td>
-            <td>{att}</td>
-        </tr>
-        """)
+    tutor_labels = [r[0] for r in tutor_rows]
+    tutor_data = [r[1] for r in tutor_rows]
 
     conn.close()
 
@@ -5768,83 +5733,75 @@ def admin_analytics():
 
     <div class='card'>
         <h2>Revenue Trend</h2>
-        <select id="revMode" onchange="updateRevenue()">
-            <option value="day">Per day (this month)</option>
+        <select id="revMode">
+            <option value="day">Per day</option>
             <option value="week">Per week</option>
             <option value="month">Per month</option>
             <option value="year">Per year</option>
-            <option value="last30">Last 30 days</option>
         </select>
         <canvas id="revChart"></canvas>
     </div>
 
     <section class='grid'>
         <div class='card'><h2>Students Mix</h2><canvas id="studentChart"></canvas></div>
-        <div class='card'><h2>Enrollment Status</h2><canvas id="statusChart"></canvas></div>
-        <div class='card'><h2>Attendance Trend</h2><canvas id="attChart"></canvas></div>
+        <div class='card'><h2>Status</h2><canvas id="statusChart"></canvas></div>
+        <div class='card'><h2>Attendance</h2><canvas id="attChart"></canvas></div>
     </section>
 
     <section class='grid'>
-        <div class='card'>
-            <h2>Revenue per Subject</h2>
-            <select id="revSubFilter" onchange="updateRevSubChart()">
-                <option value="3">Top 3</option>
-                <option value="10">Top 10</option>
-                <option value="all">All</option>
-            </select>
-            <canvas id="revSubChart"></canvas>
-        </div>
-
-        <div class='card'>
-            <h2>Top Rated Tutors</h2>
-            <select id="tutorFilter" onchange="updateTutorChart()">
-                <option value="3">Top 3</option>
-                <option value="10">Top 10</option>
-                <option value="all">All</option>
-            </select>
-            <canvas id="tutorChart"></canvas>
-        </div>
+        <div class='card'><h2>Revenue per Subject</h2><canvas id="revSubChart"></canvas></div>
+        <div class='card'><h2>Top Rated Tutors</h2><canvas id="tutorChart"></canvas></div>
     </section>
-
-    <div class='card'>
-        <h2>Subject Performance</h2>
-        <div class="scroll-x">
-            <table>
-                <thead>
-                    <tr><th>Subject</th><th>Active students</th><th>Attendance rows</th></tr>
-                </thead>
-                <tbody>{''.join(rows)}</tbody>
-            </table>
-        </div>
-    </div>
 
     <script>
     const revenueSets = {{
-        day: {json.dumps([r['label'] for r in day_rows]) , json.dumps([r['v'] for r in day_rows])},
-        week: {json.dumps([r['label'] for r in week_rows]) , json.dumps([r['v'] for r in week_rows])},
-        month: {json.dumps([r['label'] for r in month_rows]) , json.dumps([r['v'] for r in month_rows])},
-        year: {json.dumps([r['label'] for r in year_rows]) , json.dumps([r['v'] for r in year_rows])},
-        last30: {json.dumps([r['label'] for r in last30_rows]) , json.dumps([r['v'] for r in last30_rows])}
+        day: [{json.dumps(day_labels)}, {json.dumps(day_data)}],
+        week: [{json.dumps(week_labels)}, {json.dumps(week_data)}],
+        month: [{json.dumps(month_labels)}, {json.dumps(month_data)}],
+        year: [{json.dumps(year_labels)}, {json.dumps(year_data)}]
     }};
 
     let revChart = new Chart(document.getElementById("revChart"), {{
         type:'line',
-        data:{{ labels: revenueSets.day[0], datasets:[{{label:'Revenue', data: revenueSets.day[1]}}] }}
+        data:{{labels:revenueSets.day[0],datasets:[{{label:'Revenue',data:revenueSets.day[1]}}]}}
     }});
 
-    function updateRevenue(){{
-        const mode = document.getElementById("revMode").value;
-        revChart.data.labels = revenueSets[mode][0];
-        revChart.data.datasets[0].data = revenueSets[mode][1];
+    document.getElementById("revMode").onchange = function(){{
+        const m = this.value;
+        revChart.data.labels = revenueSets[m][0];
+        revChart.data.datasets[0].data = revenueSets[m][1];
         revChart.update();
     }}
 
-    // other charts unchanged...
+    new Chart(studentChart, {{
+        type:'pie',
+        data:{{labels:['New','Returning'],datasets:[{{data:[{new_students},{returning}]}}]}}
+    }});
+
+    new Chart(statusChart, {{
+        type:'bar',
+        data:{{labels:['Pending','Active','Lapsed'],datasets:[{{data:[{pending},{active},{lapsed}]}}]}}
+    }});
+
+    new Chart(attChart, {{
+        type:'line',
+        data:{{labels:{json.dumps(att_labels)},datasets:[{{label:'Attendance',data:{json.dumps(att_data)}}}]}}
+    }});
+
+    new Chart(revSubChart, {{
+        type:'bar',
+        data:{{labels:{json.dumps(rev_sub_labels)},datasets:[{{label:'Revenue',data:{json.dumps(rev_sub_data)}}}]}}
+    }});
+
+    new Chart(tutorChart, {{
+        type:'bar',
+        data:{{labels:{json.dumps(tutor_labels)},datasets:[{{label:'Avg ★',data:{json.dumps(tutor_data)}}}]}}
+    }});
     </script>
     """
 
-    return page("Analytics Dashboard", body)  
-  
+    return page("Analytics Dashboard", body)
+ 
 # --- Export remove list ---
 
 @app.get('/api/export/remove-list')
