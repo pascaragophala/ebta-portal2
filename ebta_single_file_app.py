@@ -535,6 +535,7 @@ def init_db():
 
 
 
+
 # ===================== Registration helper/table ==============
 def ensure_registration_table(conn=None):
     """Ensure registrations table exists. If conn provided, use it; otherwise open a new connection."""
@@ -1752,7 +1753,6 @@ def page(title, body_html, extra_head="", extra_js=""):
     <meta name='viewport' content='width=device-width, initial-scale=1'/>
     <title>{title}</title>
     <link rel="icon" type="image/jpeg" href="https://i.imgur.com/SqocnYt.png">
-
     <!-- PWA -->
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#0f172a">
@@ -1777,7 +1777,7 @@ def page(title, body_html, extra_head="", extra_js=""):
 
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
+    
     {GOOGLE_FONTS}{BASE_CSS}{BASE_JS}{extra_head}
     </head><body>
     <header class='header'>
@@ -1795,7 +1795,7 @@ def page(title, body_html, extra_head="", extra_js=""):
             </button>
             {right}
         </div>
-
+        
         </div>
     </header>
 
@@ -1805,12 +1805,10 @@ def page(title, body_html, extra_head="", extra_js=""):
         <div class="copyright">
             © <span id="year"></span> Early Bird Testimony Academy · All rights reserved.
         </div>
-        <div style="opacity:0.95;">⚡ Powered by <a href="https://pascalmindtech.co.za/" target="_blank" style="color:#000;text-decoration:underline;font-weight:600;">PascalMindTech</a></div>
+        <div style="opacity:0.95;">⚡ Powered by <a href="https://pascalmindtech.netlify.app/" target="_blank" style="color:#000;text-decoration:underline;font-weight:600;">Pasca Ragophala</a></div>
     </footer>{extra_js}
     </body></html>
     """
-
-
 # ===================== File routes ==============
 @app.route('/uploads/<path:filename>')
 def uploads(filename): return send_from_directory(UPLOAD_DIR, filename)
@@ -2105,7 +2103,7 @@ def home():
             </div>
             
             <div style="margin-top:14px;">
-                <label>Amount paid</label>
+                <label>Amount You Paid</label>
                 <input
                     type="number"
                     name="amount_paid"
@@ -2113,7 +2111,7 @@ def home():
                     inputmode="numeric"
                     min="0"
                     step="1"
-                    placeholder="Enter amount paid for this month"
+                    placeholder="Enter the amount you paid for classes"
                     required
                 />
                 <div class="mini muted" id="amount_paid_hint" style="margin-top:4px;"></div>
@@ -3407,7 +3405,6 @@ def student_home():
     return page("Student Portal", body)
 
 
-
 @app.post('/student/set-month')
 def student_set_month():
     r = require_student()
@@ -4471,6 +4468,7 @@ def admin_enrollments():
     """
 
     return page("Enrollments", body)
+
     
 
 @app.post('/admin/enrollments/<int:id>/<action>')
@@ -4722,6 +4720,7 @@ def admin_students():
     """
 
     return page("Students", body)
+
 
 
 @app.post('/admin/students/add')
@@ -5912,6 +5911,7 @@ def admin_analytics():
 
     return page("Analytics Dashboard", body)
  
+
 # --- Export remove list ---
 
 @app.get('/api/export/remove-list')
