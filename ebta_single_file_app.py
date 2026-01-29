@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import datetime
 import calendar
@@ -225,17 +226,6 @@ def init_db():
         FOREIGN KEY(tutor_id) REFERENCES tutors(id)
     );
     """)
-    
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS session_visibility(
-        session_id INTEGER,
-        month TEXT,
-        is_visible INTEGER DEFAULT 1,
-        PRIMARY KEY (session_id, month),
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );
-    """)
-
     
     ensure_column(conn, "students", "guardian_name", "TEXT")
     ensure_column(conn, "materials", "is_assignment", "INTEGER NOT NULL DEFAULT 0")
@@ -541,7 +531,6 @@ def init_db():
     
     conn.commit()
     conn.close()
-
 
 
 
@@ -1763,6 +1752,32 @@ def page(title, body_html, extra_head="", extra_js=""):
     <meta name='viewport' content='width=device-width, initial-scale=1'/>
     <title>{title}</title>
     <link rel="icon" type="image/jpeg" href="https://i.imgur.com/SqocnYt.png">
+
+    <!-- PWA -->
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <script>
+      if ("serviceWorker" in navigator) {{
+        navigator.serviceWorker.register("/static/sw.js");
+      }}
+
+      window.addEventListener("beforeinstallprompt", e => {{
+        e.preventDefault();
+        window.deferredPrompt = e;
+      }});
+
+      function installApp() {{
+        if (window.deferredPrompt) {{
+          window.deferredPrompt.prompt();
+        }} else {{
+          alert("Install option not available yet. Use your browser menu.");
+        }}
+      }}
+    </script>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     {GOOGLE_FONTS}{BASE_CSS}{BASE_JS}{extra_head}
     </head><body>
     <header class='header'>
@@ -1774,8 +1789,13 @@ def page(title, body_html, extra_head="", extra_js=""):
             <div class='title'>EBTA Portal</div>
         </div>
         <div class='links'>
-            <a href='/'>Home</a>{right}
+            <a href='/'>Home</a>
+            <button onclick="installApp()" class="btn success mini" style="margin-left:8px">
+                Install App
+            </button>
+            {right}
         </div>
+
         </div>
     </header>
 
@@ -1785,10 +1805,12 @@ def page(title, body_html, extra_head="", extra_js=""):
         <div class="copyright">
             © <span id="year"></span> Early Bird Testimony Academy · All rights reserved.
         </div>
-        <div style="opacity:0.95;">⚡ Powered by <a href="https://pascalmindtech.netlify.app/" target="_blank" style="color:#000;text-decoration:underline;font-weight:600;">Pasca Ragophala</a></div>
+        <div style="opacity:0.95;">⚡ Powered by <a href="https://pascalmindtech.co.za/" target="_blank" style="color:#000;text-decoration:underline;font-weight:600;">PascalMindTech</a></div>
     </footer>{extra_js}
     </body></html>
     """
+
+
 # ===================== File routes ==============
 @app.route('/uploads/<path:filename>')
 def uploads(filename): return send_from_directory(UPLOAD_DIR, filename)
@@ -2083,7 +2105,7 @@ def home():
             </div>
             
             <div style="margin-top:14px;">
-                <label>Amount You Paid</label>
+                <label>Amount paid</label>
                 <input
                     type="number"
                     name="amount_paid"
@@ -2091,7 +2113,7 @@ def home():
                     inputmode="numeric"
                     min="0"
                     step="1"
-                    placeholder="Enter the amount you paid for classes"
+                    placeholder="Enter amount paid for this month"
                     required
                 />
                 <div class="mini muted" id="amount_paid_hint" style="margin-top:4px;"></div>
@@ -3111,35 +3133,20 @@ def student_home():
             group_html=f'<div class="scroll-x"><table><thead><tr><th>Subject</th><th>Link</th></tr></thead><tbody>{rows}</tbody></table></div>'
 
     # Sessions + Meet link for enrolled subjects
-    # Sessions + Meet link for enrolled subjects (MONTH-AWARE)
-    sessions_html = "<div class='empty'>No sessions yet.</div>"
+    sessions_html="<div class='empty'>No sessions yet.</div>"
     if has_active_enrollment and active_sub_ids:
-        q = f"""
-        SELECT s.id, s.subject_id, sub.name AS subject_name, sub.grade,
-               s.day_of_week, s.start_time, s.end_time, s.meet_link
-        FROM sessions s
-        JOIN subjects sub ON sub.id=s.subject_id
-        LEFT JOIN session_visibility sv
-          ON sv.session_id = s.id AND sv.month = ?
-        WHERE s.active=1
-          AND s.subject_id IN ({','.join('?'*len(active_sub_ids))})
-          AND COALESCE(sv.is_visible,1)=1
-        ORDER BY s.day_of_week, s.start_time
-        """
-        cur.execute(q, (month, *active_sub_ids))
-        sess = cur.fetchall()
-
+        q=f"""SELECT s.subject_id, sub.name AS subject_name, sub.grade, s.day_of_week, s.start_time, s.end_time, s.meet_link
+            FROM sessions s JOIN subjects sub ON sub.id=s.subject_id
+            WHERE s.active=1 AND s.subject_id IN ({','.join('?'*len(active_sub_ids))})
+            ORDER BY s.day_of_week, s.start_time"""
+        cur.execute(q, (*active_sub_ids,))
+        sess=cur.fetchall()
         if sess:
             rows=[]
             for r in sess:
                 meet = f"<a class='links' target='_blank' href='{r['meet_link']}'>Join</a>" if r['meet_link'] else "—"
-                rows.append(
-                    f"<tr>"
-                    f"<td>{grade_label(r['grade'])} — {r['subject_name']}</td>"
-                    f"<td>{DOW[r['day_of_week']]} {r['start_time']}-{r['end_time']}</td>"
-                    f"<td>{meet}</td>"
-                    f"</tr>"
-                )
+                rows.append(f"<tr><td>{grade_label(r['grade'])} — {r['subject_name']}</td><td>{DOW[r['day_of_week']]} {r['start_time']}-{r['end_time']}</td><td>{meet}</td></tr>")
+            rows_html = "".join(rows)
 
             sessions_html = f"""
             <div class="scroll-x">
@@ -3152,12 +3159,11 @@ def student_home():
                         </tr>
                     </thead>
                     <tbody>
-                        {''.join(rows)}
+                        {rows_html}
                     </tbody>
                 </table>
             </div>
             """
-
 
 
     # Materials & Assignments list (with upload timestamp)
@@ -3399,6 +3405,7 @@ def student_home():
     {compose_block}
     </section>"""
     return page("Student Portal", body)
+
 
 
 @app.post('/student/set-month')
@@ -4464,7 +4471,6 @@ def admin_enrollments():
     """
 
     return page("Enrollments", body)
-
     
 
 @app.post('/admin/enrollments/<int:id>/<action>')
@@ -4716,7 +4722,6 @@ def admin_students():
     """
 
     return page("Students", body)
-
 
 
 @app.post('/admin/students/add')
@@ -5265,66 +5270,56 @@ def admin_set_system_month():
 @app.get('/admin/sessions')
 def admin_sessions():
     r = require_admin()
-    if r: return r
-
-    month = get_admin_active_month()
-
+    if r:
+        return r
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute("SELECT id,name,grade FROM subjects ORDER BY grade,name")
     subjects = cur.fetchall()
-
     cur.execute("""
-    SELECT se.*, s.name AS subject_name, s.grade,
-           t.full_name AS tutor_name, t.phone AS tutor_phone,
-           COALESCE(sv.is_visible,1) AS month_visible
+    SELECT se.*, s.name AS subject_name, s.grade, t.full_name AS tutor_name, t.phone AS tutor_phone
     FROM sessions se
     JOIN subjects s ON s.id=se.subject_id
     JOIN tutors t ON t.id=se.tutor_id
-    LEFT JOIN session_visibility sv
-      ON sv.session_id = se.id AND sv.month = ?
     ORDER BY se.day_of_week, se.start_time
-    """, (month,))
+    """)
     sessions_rows = cur.fetchall()
     conn.close()
 
     options = ''.join([f"<option value='{s['id']}'>{s['grade']} — {s['name']}</option>" for s in subjects])
     dow_opts = ''.join([f"<option value='{i}'>{d}</option>" for i, d in enumerate(DOW)])
+    rows = ''.join(
+        [
+            (
+                f"<tr>"
+                f"<td>{grade_label(r['grade'])} — {r['subject_name']}</td>"
+                f"<td>{r['tutor_name']} ({r['tutor_phone']})</td>"
+                f"<td>{DOW[r['day_of_week']]} {r['start_time']}-{r['end_time']}</td>"
+                f"<td>"
+                f"{'<span class=\"chip active\">Shown</span>' if r['active'] == 1 else '<span class=\"chip lapsed\">Hidden</span>'}"
+                f"</td>"
+                f"<td>"
+                f"<a class='links' href='{url_for('session_qr', id=r['id'])}'>QR</a> · "
+                f"<form method='post' action='{url_for('admin_session_toggle', sid=r['id'])}' style='display:inline'>"
+                f"<button class='btn mini secondary'>{'Hide' if r['active'] == 1 else 'Show'}</button>"
+                f"</form> · "
+                f"<form method='post' action='{url_for('admin_session_delete', sid=r['id'])}' "
+                f"style='display:inline' onsubmit='return confirm(\"Delete this session?\")'>"
+                f"<button class='btn danger mini'>Delete</button>"
+                f"</form>"
+                f"</td>"
+                f"</tr>"
+            )
+            for r in sessions_rows
+        ]
+    ) or "<tr><td colspan='5'><div class='empty'>No sessions.</div></td></tr>"
 
-    rows = ''.join([
-        f"""
-        <tr>
-            <td>{grade_label(r['grade'])} — {r['subject_name']}</td>
-            <td>{r['tutor_name']} ({r['tutor_phone']})</td>
-            <td>{DOW[r['day_of_week']]} {r['start_time']}-{r['end_time']}</td>
-            <td>
-                {"<span class='chip active'>Visible</span>" if r['month_visible']==1
-                 else "<span class='chip lapsed'>Hidden</span>"}
-            </td>
-            <td>
-                <form method='post' action='{url_for("admin_session_toggle", sid=r["id"])}' style='display:inline'>
-                    <button class='btn mini secondary'>
-                        {"Hide for this month" if r['month_visible']==1 else "Show for this month"}
-                    </button>
-                </form>
-                ·
-                <form method='post' action='{url_for("admin_session_delete", sid=r["id"])}'
-                      style='display:inline'
-                      onsubmit='return confirm("Delete this session completely?")'>
-                    <button class='btn danger mini'>Delete</button>
-                </form>
-            </td>
-        </tr>
-        """
-        for r in sessions_rows
-    ]) or "<tr><td colspan='5'><div class='empty'>No sessions.</div></td></tr>"
+
 
     body = f"""
     {admin_nav()}
     <section class='card'>
-        <h1>Sessions – {pretty_month_label(month)}</h1>
-
+        <h1>Sessions</h1>
         <form class='grid' method='post' action='{url_for('admin_sessions_post')}'>
         <div style='display:grid;grid-template-columns:1fr 1fr 110px 110px 1fr auto;gap:10px'>
             <select name='subject_id'>{options}</select>
@@ -5337,49 +5332,29 @@ def admin_sessions():
             <button class='btn'>Add</button>
         </div>
         </form>
-
-        <div class="scroll-x">
-        <table>
-            <thead>
-                <tr>
-                    <th>Subject</th>
-                    <th>Tutor</th>
-                    <th>When</th>
-                    <th>Visibility (this month)</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>{rows}</tbody>
-        </table>
-        </div>
+        <div class="scroll-x"><table><thead><tr><th>Subject</th><th>Tutor</th><th>When</th><th>Visibility</th><th>Actions</th></thead><tbody>{rows}</tbody></table></div>
     </section>
     """
     return page("Sessions", body)
-
     
 
 @app.post('/admin/sessions/toggle/<int:sid>')
 def admin_session_toggle(sid):
     r = require_admin()
-    if r: return r
-
-    month = get_admin_active_month()
+    if r:
+        return r
 
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute("""
-    INSERT INTO session_visibility(session_id, month, is_visible)
-    VALUES(?,?,0)
-    ON CONFLICT(session_id,month)
-    DO UPDATE SET is_visible =
-        CASE WHEN is_visible=1 THEN 0 ELSE 1 END
-    """, (sid, month))
-
+        UPDATE sessions
+        SET active = CASE WHEN active=1 THEN 0 ELSE 1 END
+        WHERE id=?
+    """, (sid,))
     conn.commit()
     conn.close()
-    return redirect(url_for('admin_sessions'))
 
+    return redirect(url_for('admin_sessions'))
 
 
 @app.post('/admin/sessions')
@@ -5699,111 +5674,244 @@ def admin_send_dm():
 def admin_analytics():
     r = require_admin()
     if r: return r
-    month = get_admin_active_month()
-    conn = get_db(); cur = conn.cursor()
 
-    # High-level: enrollments by status
-    cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=?", (month,)); total = cur.fetchone()['c']
+    import json
+
+    month = get_admin_active_month()
+    conn = get_db()
+    cur = conn.cursor()
+
+    # ===== KPIs =====
+    cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=?", (month,))
+    total = cur.fetchone()['c'] or 0
+
     def count_status(s):
         cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=? AND status=?", (month,s))
-        return cur.fetchone()['c']
-    pending, active, lapsed = count_status('PENDING'), count_status('ACTIVE'), count_status('LAPSED')
+        return cur.fetchone()['c'] or 0
 
-    # Per subject aggregates (attendance, submissions, marks, ratings)
-    cur.execute("SELECT id, name, grade FROM subjects ORDER BY grade, name")
+    pending = count_status('PENDING')
+    active = count_status('ACTIVE')
+    lapsed = count_status('LAPSED')
+
+    cur.execute("SELECT SUM(amount_paid) AS r FROM enrollments WHERE month=? AND status='ACTIVE'", (month,))
+    revenue = cur.fetchone()['r'] or 0
+
+    # ===== New vs Returning =====
+    cur.execute("""
+        SELECT COUNT(DISTINCT student_id)
+        FROM enrollments
+        WHERE month=? AND status='ACTIVE'
+        AND student_id NOT IN (
+            SELECT student_id FROM enrollments WHERE month < ?
+        )
+    """, (month, month))
+    new_students = cur.fetchone()[0] or 0
+
+    cur.execute("""
+        SELECT COUNT(DISTINCT student_id)
+        FROM enrollments
+        WHERE month=? AND status='ACTIVE'
+        AND student_id IN (
+            SELECT student_id FROM enrollments WHERE month < ?
+        )
+    """, (month, month))
+    returning = cur.fetchone()[0] or 0
+
+    # ===== Revenue trend (per selected month, per day) =====
+    cur.execute("""
+        SELECT substr(created_at,1,10) AS day, SUM(amount_paid) AS r
+        FROM enrollments
+        WHERE month=? AND status='ACTIVE'
+        GROUP BY day ORDER BY day
+    """, (month,))
+    rev_rows = cur.fetchall()
+    rev_labels = [r['day'] for r in rev_rows]
+    rev_data = [r['r'] for r in rev_rows]
+
+    # ===== Attendance trend =====
+    cur.execute("""
+        SELECT a.date, COUNT(*) AS c
+        FROM attendance a
+        WHERE strftime('%Y-%m', a.date)=?
+        GROUP BY a.date ORDER BY a.date
+    """, (month,))
+    att_rows = cur.fetchall()
+    att_labels = [r['date'] for r in att_rows]
+    att_data = [r['c'] for r in att_rows]
+
+    # ===== Revenue per subject =====
+    cur.execute("""
+        SELECT s.name || ' (' || s.grade || ')' AS label, SUM(e.amount_paid) AS r
+        FROM enrollments e
+        JOIN subjects s ON s.id=e.subject_id
+        WHERE e.month=? AND e.status='ACTIVE'
+        GROUP BY s.id
+        ORDER BY r DESC
+    """, (month,))
+    rev_sub_rows = cur.fetchall()
+    rev_sub_labels = [r['label'] for r in rev_sub_rows]
+    rev_sub_data = [r['r'] for r in rev_sub_rows]
+
+    # ===== Top rated tutors =====
+    cur.execute("""
+        SELECT t.full_name, AVG(l.rating) AS avg_rating
+        FROM lesson_ratings l
+        JOIN tutor_subjects ts ON ts.subject_id=l.subject_id
+        JOIN tutors t ON t.id=ts.tutor_id
+        WHERE l.month=?
+        GROUP BY t.id
+        ORDER BY avg_rating DESC
+    """, (month,))
+    tutor_rows = cur.fetchall()
+    tutor_labels = [r['full_name'] for r in tutor_rows]
+    tutor_data = [round(r['avg_rating'],2) for r in tutor_rows]
+
+    # ===== Subject performance table =====
+    cur.execute("SELECT id,name,grade FROM subjects ORDER BY grade,name")
     subs = cur.fetchall()
 
-    rows = []
+    rows=[]
     for s in subs:
-        # active students
-        cur.execute("""SELECT COUNT(*) AS c FROM enrollments 
-                    WHERE subject_id=? AND month=? AND status='ACTIVE'""", (s['id'], month))
+        cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE subject_id=? AND month=? AND status='ACTIVE'", (s['id'], month))
         active_students = cur.fetchone()['c'] or 0
 
-        # sessions recorded days
-        cur.execute("""SELECT COUNT(DISTINCT a.date) AS d
-                    FROM attendance a JOIN sessions se ON se.id=a.session_id
-                    WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?""", (s['id'], month))
-        days = cur.fetchone()['d'] or 0
-
-        # total attendance rows
-        cur.execute("""SELECT COUNT(*) AS c
-                    FROM attendance a JOIN sessions se ON se.id=a.session_id
-                    WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?""", (s['id'], month))
-        att_rows = cur.fetchone()['c'] or 0
-        # overall attendance rate: present count over (days * active_students)
-        att_rate = (int(round((att_rows / (days*active_students))*100)) if days>0 and active_students>0 else 0)
-
-        # assignments this month
-        cur.execute("""SELECT COUNT(*) AS c FROM materials 
-                    WHERE subject_id=? AND month=? AND (is_assignment=1 OR kind='assignment')""", (s['id'], month))
-        asg_count = cur.fetchone()['c'] or 0
-
-        # submissions + avg mark
-        cur.execute("""SELECT COUNT(*) AS c, AVG(sub.mark) AS avgm
-                    FROM submissions sub JOIN materials m ON m.id=sub.material_id
-                    WHERE m.subject_id=? AND m.month=? AND (m.is_assignment=1 OR m.kind='assignment')""", (s['id'], month))
-        subrow = cur.fetchone(); submissions = subrow['c'] or 0; avgm = subrow['avgm']
-        avgm_txt = "-" if avgm is None else f"{int(round(avgm))}"
-
-        # submission completion: divide by (#assignments * #active_students)
-        denom = (asg_count * active_students) if asg_count and active_students else 0
-        completion = int(round((submissions/denom)*100)) if denom else 0
-
-        # ratings avg
-        cur.execute("""SELECT AVG(rating) AS r, COUNT(*) AS n
-                    FROM lesson_ratings WHERE subject_id=? AND month=?""", (s['id'], month))
-        rrow = cur.fetchone(); rating_avg = (round(rrow['r'],1) if rrow['r'] else None); rating_n = rrow['n'] or 0
-        rating_txt = "—" if rating_avg is None else f"{rating_avg} ★ ({rating_n})"
+        cur.execute("""SELECT COUNT(*) AS c FROM attendance a
+                       JOIN sessions se ON se.id=a.session_id
+                       WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?""", (s['id'], month))
+        att = cur.fetchone()['c'] or 0
 
         rows.append(f"""
         <tr>
             <td>{grade_label(s['grade'])} — {s['name']}</td>
             <td>{active_students}</td>
-            <td>{att_rate}%</td>
-            <td>{asg_count}</td>
-            <td>{submissions}</td>
-            <td>{completion}%</td>
-            <td>{avgm_txt}</td>
-            <td>{rating_txt}</td>
+            <td>{att}</td>
         </tr>
         """)
 
     conn.close()
 
-    table = f"""
-    <div class="scroll-x">
-        <table>
-            <thead>
-            <tr>
-                <th>Subject</th><th>Active</th><th>Attendance</th>
-                <th>#Assign</th><th>#Submissions</th><th>Completion</th>
-                <th>Avg mark</th><th>Rating</th>
-            </tr>
-            </thead>
-            <tbody>{''.join(rows) if rows else "<tr><td colspan='8'><div class='empty'>No data.</div></td></tr>"}</tbody>
-        </table>
-    </div>
-    """
-
     body = f"""
     {admin_nav()}
-    <section class='grid'>
-        <div class='stats'>
-        {stat('Current month', month)}
+
+    <section class='stats big'>
+        {stat('Revenue', f'R{revenue}')}
         {stat('Enrollments', total)}
-        {stat('Pending', pending)}
         {stat('Active', active)}
+        {stat('New students', new_students)}
+        {stat('Returning', returning)}
         {stat('Lapsed', lapsed)}
+    </section>
+
+    <section class='grid'>
+        <div class='card'>
+            <h2>Revenue Trend — {month}</h2>
+            <p class="mini muted">Daily revenue for the selected month</p>
+            <canvas id="revChart"></canvas>
         </div>
-        <div class='card'><h1>Subject Analytics — {month}</h1>
-        <p class='muted mini'>Completion = submissions ÷ (assignments × active students). Ratings are learner feedback captured between the 24th and month end.</p>
-        {table}
+
+        <div class='card'><h2>Students Mix</h2><canvas id="studentChart"></canvas></div>
+        <div class='card'><h2>Enrollment Status</h2><canvas id="statusChart"></canvas></div>
+        <div class='card'><h2>Attendance Trend</h2><canvas id="attChart"></canvas></div>
+    </section>
+
+    <section class='grid'>
+        <div class='card'>
+            <h2>Revenue per Subject</h2>
+            <select id="revSubFilter" onchange="updateRevSubChart()">
+                <option value="3">Top 3</option>
+                <option value="10">Top 10</option>
+                <option value="all">All</option>
+            </select>
+            <canvas id="revSubChart"></canvas>
+        </div>
+
+        <div class='card'>
+            <h2>Top Rated Tutors</h2>
+            <select id="tutorFilter" onchange="updateTutorChart()">
+                <option value="3">Top 3</option>
+                <option value="10">Top 10</option>
+                <option value="all">All</option>
+            </select>
+            <canvas id="tutorChart"></canvas>
         </div>
     </section>
-    """
-    return page("Analytics", body)
 
+    <div class='card'>
+        <h2>Subject Performance</h2>
+        <div class="scroll-x">
+            <table>
+                <thead>
+                    <tr><th>Subject</th><th>Active students</th><th>Attendance rows</th></tr>
+                </thead>
+                <tbody>{''.join(rows)}</tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+    const revLabels = {json.dumps(rev_labels)};
+    const revData = {json.dumps(rev_data)};
+    const attLabels = {json.dumps(att_labels)};
+    const attData = {json.dumps(att_data)};
+    const revSubLabels = {json.dumps(rev_sub_labels)};
+    const revSubData = {json.dumps(rev_sub_data)};
+    const tutorLabels = {json.dumps(tutor_labels)};
+    const tutorData = {json.dumps(tutor_data)};
+
+    new Chart(document.getElementById("revChart"), {{
+        type:'line',
+        data:{{labels:revLabels,datasets:[{{label:'Revenue',data:revData}}]}}
+    }});
+
+    new Chart(document.getElementById("studentChart"), {{
+        type:'pie',
+        data:{{labels:['New','Returning'],datasets:[{{data:[{new_students},{returning}]}}]}}
+    }});
+
+    new Chart(document.getElementById("statusChart"), {{
+        type:'bar',
+        data:{{labels:['Pending','Active','Lapsed'],datasets:[{{data:[{pending},{active},{lapsed}]}}]}}
+    }});
+
+    new Chart(document.getElementById("attChart"), {{
+        type:'line',
+        data:{{labels:attLabels,datasets:[{{label:'Attendance',data:attData}}]}}
+    }});
+
+    const revSubCtx = document.getElementById("revSubChart").getContext("2d");
+    let revSubChartObj = new Chart(revSubCtx, {{
+        type:'bar',
+        data:{{labels:revSubLabels,datasets:[{{label:'Revenue',data:revSubData}}]}}
+    }});
+
+    function updateRevSubChart(){{
+        const mode = document.getElementById("revSubFilter").value;
+        let l = revSubLabels, d = revSubData;
+        if(mode !== "all"){{ l=l.slice(0,mode); d=d.slice(0,mode); }}
+        revSubChartObj.data.labels = l;
+        revSubChartObj.data.datasets[0].data = d;
+        revSubChartObj.update();
+    }}
+
+    const tutorCtx = document.getElementById("tutorChart").getContext("2d");
+    let tutorChartObj = new Chart(tutorCtx, {{
+        type:'bar',
+        data:{{labels:tutorLabels,datasets:[{{label:'Avg ★',data:tutorData}}]}}
+    }});
+
+    function updateTutorChart(){{
+        const mode = document.getElementById("tutorFilter").value;
+        let l = tutorLabels, d = tutorData;
+        if(mode !== "all"){{ l=l.slice(0,mode); d=d.slice(0,mode); }}
+        tutorChartObj.data.labels = l;
+        tutorChartObj.data.datasets[0].data = d;
+        tutorChartObj.update();
+    }}
+    </script>
+    """
+
+    return page("Analytics Dashboard", body)
+ 
 # --- Export remove list ---
 
 @app.get('/api/export/remove-list')
