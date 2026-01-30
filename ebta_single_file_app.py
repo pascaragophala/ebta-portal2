@@ -2908,7 +2908,7 @@ def status(id: int):
         if (e['status'] == 'ACTIVE' and gl)
         else (
             "<div class='muted mini'>"
-            "<strong>Next steps:</strong> Once your enrollment is approved (usually within 7 days), "
+            "<strong>Next steps:</strong> Once your enrollment is approved (usually within 14 days), "
             "you’ll be able to log in on the Student Portal using the phone number you used to enroll "
             "and your 5-digit PIN to access all classes and learning materials."
             "</div>"
@@ -4353,7 +4353,7 @@ def admin_enrollments():
         SELECT 
             e.id, e.student_id, e.status, e.amount_paid,
             e.pop_url, e.status_token,
-            strftime('%Y-%m-%d %H:%M', e.created_at) AS created_at,
+            strftime('%Y-%m-%d %H:%M', datetime(e.created_at, '+2 hours')) AS created_at,
             st.full_name, st.phone_whatsapp, st.grade,
             sub.name AS subject_name
         FROM enrollments e
@@ -5911,7 +5911,6 @@ def admin_analytics():
 
     return page("Analytics Dashboard", body)
  
-
 # --- Export remove list ---
 
 @app.get('/api/export/remove-list')
