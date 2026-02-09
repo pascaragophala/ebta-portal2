@@ -244,6 +244,8 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_enrollment_files_enr ON enrollment_files(enrollment_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_students_created ON students(created_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_enrollments_month_created ON enrollments(month, created_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)")
+
 
 
 
@@ -342,14 +344,11 @@ def init_db():
             ("Accounting","G12"),("Accounting","G13"),
 
             # Geography
-            ("Geography","G11"),
             ("Geography","G12"),
 
             # Economics
-            ("Economics","G12"),
 
             # Business Studies
-            ("Business Studies","G10"),
             ("Business Studies","G11"),
             ("Business Studies","G12"),
 
@@ -389,14 +388,11 @@ def init_db():
             ("Accounting","G12"),("Accounting","G13"),
 
             # Geography
-            ("Geography","G11"),
             ("Geography","G12"),
 
             # Economics
-            ("Economics","G12"),
 
             # Business Studies
-            ("Business Studies","G10"),
             ("Business Studies","G11"),
             ("Business Studies","G12"),
 
@@ -456,13 +452,13 @@ def init_db():
         FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
     );
     """)
-    
+
     # Enrollment control defaults
     cur.execute("SELECT value FROM settings WHERE key='enrollment_open'")
     if not cur.fetchone():
         cur.execute(
             "INSERT INTO settings(key,value) VALUES(?,?)",
-            ('enrollment_open', '1')  # 1 = open, 0 = closed
+            ('enrollment_open', '1')
         )
 
     cur.execute("SELECT value FROM settings WHERE key='enrollment_message'")
@@ -475,62 +471,60 @@ def init_db():
             )
         )
 
-    
+
     # --- REMOVE UNWANTED SUBJECTS (SAFE CLEANUP) ---
     # (Currently disabled – kept for future use)
 
-    # subjects_to_remove = [
-    #     ("Geography", "G10"),
-    #     ("Geography", "G13"),
-    #     ("Economics", "G10"),
-    #     ("Economics", "G11"),
-    #     ("Economics", "G13"),
-    #     ("Business Studies", "G13"),
-    # ]
+    subjects_to_remove = [
+        ("Geography", "G11"),
+        ("Economics", "G12"),
+        ("Business Studies", "G10"),
+    ]
 
-    # for name, grade in subjects_to_remove:
-    #     # Remove related enrollments
-    #     cur.execute("""
-    #         DELETE FROM enrollments
-    #         WHERE subject_id IN (
-    #             SELECT id FROM subjects WHERE name=? AND grade=?
-    #         )
-    #     """, (name, grade))
+    for name, grade in subjects_to_remove:
 
-    #     # Remove tutor-subject mappings
-    #     cur.execute("""
-    #         DELETE FROM tutor_subjects
-    #         WHERE subject_id IN (
-    #             SELECT id FROM subjects WHERE name=? AND grade=?
-    #         )
-    #     """, (name, grade))
+        # Remove related enrollments
+        cur.execute("""
+            DELETE FROM enrollments
+            WHERE subject_id IN (
+                SELECT id FROM subjects WHERE name=? AND grade=?
+            )
+        """, (name, grade))
 
-    #     # Remove groups
-    #     cur.execute("""
-    #         DELETE FROM groups
-    #         WHERE subject_id IN (
-    #             SELECT id FROM subjects WHERE name=? AND grade=?
-    #         )
-    #     """, (name, grade))
+        # Remove tutor-subject mappings
+        cur.execute("""
+            DELETE FROM tutor_subjects
+            WHERE subject_id IN (
+                SELECT id FROM subjects WHERE name=? AND grade=?
+            )
+        """, (name, grade))
 
-    #     # Remove sessions
-    #     cur.execute("""
-    #         DELETE FROM sessions
-    #         WHERE subject_id IN (
-    #             SELECT id FROM subjects WHERE name=? AND grade=?
-    #         )
-    #     """, (name, grade))
+        # Remove groups
+        cur.execute("""
+            DELETE FROM groups
+            WHERE subject_id IN (
+                SELECT id FROM subjects WHERE name=? AND grade=?
+            )
+        """, (name, grade))
 
-    #     # Finally remove the subject itself
-    #     cur.execute("""
-    #         DELETE FROM subjects
-    #         WHERE name=? AND grade=?
-    #     """, (name, grade))
+        # Remove sessions
+        cur.execute("""
+            DELETE FROM sessions
+            WHERE subject_id IN (
+                SELECT id FROM subjects WHERE name=? AND grade=?
+            )
+        """, (name, grade))
+
+        # Finally remove the subject itself
+        cur.execute("""
+            DELETE FROM subjects
+            WHERE name=? AND grade=?
+        """, (name, grade))
 
 
-    
     conn.commit()
     conn.close()
+
 
 
 
@@ -1805,7 +1799,7 @@ def page(title, body_html, extra_head="", extra_js=""):
         <div class="copyright">
             © <span id="year"></span> Early Bird Testimony Academy · All rights reserved.
         </div>
-        <div style="opacity:0.95;">⚡ Powered by <a href="https://pascalmindtech.netlify.app/" target="_blank" style="color:#000;text-decoration:underline;font-weight:600;">Pasca Ragophala</a></div>
+        <div style="opacity:0.95;">⚡ Powered by <a href="https://pascalmindtech.co.za/" target="_blank" style="color:#000;text-decoration:underline;font-weight:600;">PascalMindTech</a></div>
     </footer>{extra_js}
     </body></html>
     """
@@ -1883,14 +1877,11 @@ def home():
         ("Accounting","G12"),("Accounting","G13"),
 
         # Geography
-        ("Geography","G11"),
         ("Geography","G12"),
 
         # Economics
-        ("Economics","G12"),
 
         # Business Studies
-        ("Business Studies","G10"),
         ("Business Studies","G11"),
         ("Business Studies","G12"),
 
@@ -1994,7 +1985,7 @@ def home():
         <!-- Student & guardian details -->
         <div class="grid two-col">
             <div>
-            <label>Student Name</label>
+            <label>Student Name & Surname</label>
             <input name='full_name' required/>
             </div>
             <div>
@@ -2081,7 +2072,7 @@ def home():
 
             <ul class="mini" style="margin:6px 0 4px 14px;padding:0;">
                 <li>Account holder: Ms MCB MOHALE</li>
-                <li>Contact: 0649619653</li>
+                <li>Capitec number: 0649619653</li>
                 <li>Account number: 2062604285</li>
                 <li>Bank name: Capitec</li>
             </ul>
@@ -2122,10 +2113,23 @@ def home():
                
 
         <div class='toolbar'>
+
+            <button type="button" class="btn secondary" onclick="openTermsModal()">
+                View Terms & Conditions
+            </button>
+
+            <label style="display:flex;align-items:center;gap:6px;">
+                <input type="checkbox" id="terms_check" required>
+                <span class="mini">I agree to the Terms & Conditions</span>
+            </label>
+
             <button class='btn'>Submit Enrollment</button>
+
             <a class='btn secondary' href='{url_for('student_login')}'>Student login</a>
             <a class='btn secondary' href='{url_for('tutor_login')}'>Tutor login</a>
+
         </div>
+
         </form>
     </div>
     </section>
@@ -2234,7 +2238,14 @@ function showPopup(message, type='info', timeout=4000){
     }
 
     form.addEventListener('submit', function(e){
-    
+        const termsCheck = document.getElementById('terms_check');
+
+        if(!termsCheck || !termsCheck.checked){
+            e.preventDefault();
+            showPopup("You must agree to the Terms & Conditions before enrolling.", "error");
+            return;
+        }
+
         // ✅ allow exit without warning when submitting
         ebtaAllowExit = true;
         const grade = gradeSelect.value;
@@ -2530,6 +2541,83 @@ function showPopup(message, type='info', timeout=4000){
       document.body.appendChild(overlay);
     });
     </script>'''
+    
+    extra_js += """
+    <script>
+
+    function openTermsModal(){
+        if(document.getElementById('terms-modal')) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'terms-modal';
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.background = 'rgba(0,0,0,0.6)';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = '99999';
+
+        const box = document.createElement('div');
+        box.style.width = '95%';
+        box.style.maxWidth = '600px';
+        box.style.maxHeight = '80vh';
+        box.style.overflow = 'auto';
+        box.style.background = '#fff';
+        box.style.padding = '20px';
+        box.style.borderRadius = '12px';
+
+        box.innerHTML = `
+            <h2>EBTA Terms & Conditions</h2>
+
+            <div style="font-size:14px;line-height:1.6;margin-top:10px;">
+
+            <p><strong>1. Enrollment Agreement</strong><br>
+            By enrolling, you agree to participate in EBTA classes and follow all academy rules.</p>
+
+            <p><strong>2. Payment Policy</strong><br>
+            • Monthly fees must be paid before attending classes.<br>
+            • Fees are non-refundable once classes have started.<br>
+            • Proof of payment must be uploaded during enrollment.</p>
+
+            <p><strong>3. PIN Responsibility</strong><br>
+            Your PIN is confidential. Do not share it with anyone.</p>
+
+            <p><strong>4. Attendance</strong><br>
+            Students must attend sessions regularly and on time.</p>
+
+            <p><strong>5. Conduct</strong><br>
+            Respect tutors, students, and academy policies at all times.</p>
+
+            <p><strong>6. Communication</strong><br>
+            Important information will be shared via WhatsApp or the EBTA Portal.</p>
+
+            <p><strong>7. Privacy</strong><br>
+            Your personal information is stored securely and used only for academic purposes.</p>
+
+            <p><strong>8. Agreement</strong><br>
+            By proceeding, you confirm that you understand and accept these Terms & Conditions.</p>
+
+            </div>
+
+            <div style="margin-top:15px;text-align:right;">
+                <button class="btn success" onclick="closeTermsModal()">Close</button>
+            </div>
+        `;
+
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+    }
+
+    function closeTermsModal(){
+        const modal = document.getElementById('terms-modal');
+        if(modal) modal.remove();
+    }
+
+    </script>
+    """
+
+    
     return page("EBTA Enrollment", body, extra_js=extra_js)
 
 
@@ -3834,10 +3922,12 @@ def tutor_home():
     stu_sections=[]
     message_student_options=[]
     for s in subs:
-        cur.execute("""SELECT st.id, st.full_name
-                    FROM enrollments e JOIN students st ON st.id=e.student_id
-                    WHERE e.subject_id=? AND e.month=? AND e.status='ACTIVE'
-                    ORDER BY st.full_name""",(s['subject_id'], month))
+        cur.execute("""SELECT st.id, st.full_name, st.phone_whatsapp
+            FROM enrollments e 
+            JOIN students st ON st.id=e.student_id
+            WHERE e.subject_id=? AND e.month=? AND e.status='ACTIVE'
+            ORDER BY st.full_name""",(s['subject_id'], month))
+
         studs=cur.fetchall()
         cur.execute("SELECT COUNT(DISTINCT date) AS c FROM attendance a JOIN sessions se ON se.id=a.session_id WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?", (s['subject_id'], month))
         total_days = cur.fetchone()['c'] or 0
@@ -3851,13 +3941,38 @@ def tutor_home():
                         JOIN materials m ON m.id=sub.material_id
                         WHERE sub.student_id=? AND m.subject_id=? AND m.month=? AND sub.mark IS NOT NULL""",(st['id'], s['subject_id'], month))
             avgm = cur.fetchone()['avgm']
-            rows.append(f"<tr><td>{st['full_name']}</td><td>{c}</td><td>{rate}</td><td>{'-' if avgm is None else int(round(avgm))}</td></tr>")
+            rows.append(f"""
+            <tr>
+                <td>
+                    {st['full_name']}
+                    <div class='mini muted'>{st['phone_whatsapp'] or '—'}</div>
+                </td>
+
+                <td>
+                    {st['phone_whatsapp'] or '—'}
+                </td>
+
+                <td>
+                    {c}
+                </td>
+
+                <td>
+                    {rate}
+                </td>
+
+                <td>
+                    {'-' if avgm is None else int(round(avgm))}
+                </td>
+
+            </tr>
+            """)
+
             message_student_options.append((st['id'], s['subject_id'], f"{st['full_name']} — {grade_label(s['grade'])} {s['subject_name']}"))
         table = (
             "<div class='empty'>No active students.</div>"
             if not rows
             else f"<div class='scroll-x'><table><thead><tr>"
-                 f"<th>Student</th><th>Attendance</th><th>Rate</th><th>Avg mark</th>"
+                 f"<th>Student</th><th>Phone</th><th>Attendance</th><th>Rate</th><th>Avg mark</th>"
                  f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
         )
 
@@ -3879,25 +3994,118 @@ def tutor_home():
     inbox = cur.fetchall()
     inbox_list = "".join([f"<div class='msg {'me' if m['from_role']=='tutor' else 'them'}'><div class='meta'>{m['from_name']} → {m['to_name']} • {m['created_at'][:16].replace('T',' ')}</div><div>{m['body']}</div></div>" for m in inbox]) or "<div class='empty'>No messages yet.</div>"
 
-    # Compose forms
-    stud_opts = "".join([f"<option value='{sid}|{subid}'>{label}</option>" for sid,subid,label in message_student_options]) or "<option value=''>No students</option>"
+    # =========================
+    # Compose forms (UPDATED)
+    # =========================
+
+    # Broadcast to ALL students across tutor subjects
+    broadcast_all = "<option value='ALL'>All My Students</option>"
+
+    # Broadcast per subject
+    subject_broadcast_opts = "".join([
+        f"<option value='SUBJECT_ALL|{s['subject_id']}'>All students — {grade_label(s['grade'])} {s['subject_name']}</option>"
+        for s in subs
+    ])
+
+    # Individual students
+    individual_opts = "".join([
+        f"<option value='{sid}|{subid}'>{label}</option>"
+        for sid, subid, label in message_student_options
+    ]) or "<option value=''>No students</option>"
+
+    # Final dropdown with categories
+    stud_opts = f"""
+    <optgroup label="Broadcast">
+        {broadcast_all}
+    </optgroup>
+
+    <optgroup label="By Subject">
+        {subject_broadcast_opts}
+    </optgroup>
+
+    <optgroup label="Individual Students">
+        {individual_opts}
+    </optgroup>
+    """
+
+
+    # =========================
+    # Inbox Card UI
+    # =========================
 
     inbox_card = f"""
-    <div class='card'><h2>Inbox & Messages</h2>
+    <div class='card'>
+
+        <h2>Inbox & Messages</h2>
+
         <div class='grid' style='grid-template-columns:1fr;gap:8px'>
-        <form method='post' action='{url_for('tutor_message_student')}' class='grid'>
-            <div><label>Message a student</label><select name='combo' required>{stud_opts}</select></div>
-            <div><label>Your message</label><textarea name='body' required placeholder='Type your message...'></textarea></div>
-            <button class='btn'>Send</button>
-        </form>
-        <form method='post' action='{url_for('tutor_message_admin')}' class='grid'>
-            <div><label>Message Admin</label><textarea name='body' required placeholder='Type your message for Admin...'></textarea></div>
-            <button class='btn secondary'>Send to Admin</button>
-        </form>
+
+            <!-- Message students -->
+            <form method='post' action='{url_for('tutor_message_student')}' class='grid'>
+
+                <div>
+                    <label>Message students</label>
+
+                    <select name='combo' required>
+                        {stud_opts}
+                    </select>
+
+                    <div class='mini muted'>
+                        You can message an individual student, a subject, or all students.
+                    </div>
+
+                </div>
+
+                <div>
+                    <label>Your message</label>
+
+                    <textarea name='body'
+                              required
+                              placeholder='Type your message...'></textarea>
+
+                </div>
+
+                <button class='btn'>
+                    Send to students
+                </button>
+
+            </form>
+
+
+            <!-- Message admin -->
+            <form method='post'
+                  action='{url_for('tutor_message_admin')}'
+                  class='grid'>
+
+                <div>
+
+                    <label>Message Admin</label>
+
+                    <textarea name='body'
+                              required
+                              placeholder='Type your message for Admin...'></textarea>
+
+                </div>
+
+                <button class='btn secondary'>
+                    Send to Admin
+                </button>
+
+            </form>
+
         </div>
-        <div style='margin-top:10px'>{inbox_list}</div>
+
+
+        <!-- Inbox messages -->
+        <div style='margin-top:10px'>
+
+            {inbox_list}
+
+        </div>
+
     </div>
     """
+
 
     conn.close()
 
@@ -4085,33 +4293,145 @@ def tutor_assignment_grade(mid:int, sid:int):
     # redirect with saved alert
     return redirect(url_for('tutor_assignment_manage', mid=mid, saved=1))
 
-# Tutor → Student message
+# Tutor → Student message (individual OR broadcast)
 @app.post('/tutor/message-student')
 def tutor_message_student():
-    r=require_tutor()
-    if r: return r
-    tid=is_tutor()
-    combo=request.form.get('combo','')
-    body=request.form.get('body','').strip()
-    if not (combo and body): return page("Error", card_msg("Choose a student and write a message."))
+
+    r = require_tutor()
+    if r:
+        return r
+
+    tid = is_tutor()
+
+    combo = request.form.get('combo', '')
+    body = request.form.get('body', '').strip()
+
+    if not body:
+        return page("Error", card_msg("Message cannot be empty."))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    month = get_setting('current_month')
+    now = now_utc_iso()
+
+    # ========================
+    # SEND TO ALL STUDENTS (ALL SUBJECTS)
+    # ========================
+    if combo == "ALL":
+
+        cur.execute("""
+            SELECT DISTINCT e.student_id, e.subject_id
+            FROM enrollments e
+            JOIN tutor_subjects ts ON ts.subject_id = e.subject_id
+            WHERE ts.tutor_id = ?
+            AND e.month = ?
+            AND e.status = 'ACTIVE'
+        """, (tid, month))
+
+        rows = cur.fetchall()
+
+        cur.executemany("""
+            INSERT INTO direct_messages
+            (from_role, from_id, to_role, to_id, subject_id, body, created_at)
+            VALUES ('tutor', ?, 'student', ?, ?, ?, ?)
+        """, [(tid, r['student_id'], r['subject_id'], body, now) for r in rows])
+
+        conn.commit()
+        conn.close()
+
+        return redirect(url_for('tutor_home'))
+
+    # ========================
+    # SEND TO ALL STUDENTS IN ONE SUBJECT
+    # ========================
+    if combo.startswith("SUBJECT_ALL|"):
+
+        try:
+            subject_id = int(combo.split('|')[1])
+        except:
+            conn.close()
+            return page("Error", card_msg("Invalid subject."))
+
+        # verify tutor teaches subject
+        cur.execute("""
+            SELECT 1
+            FROM tutor_subjects
+            WHERE tutor_id=? AND subject_id=?
+        """, (tid, subject_id))
+
+        if not cur.fetchone():
+            conn.close()
+            return page("Error", card_msg("You are not assigned to that subject."))
+
+        cur.execute("""
+            SELECT student_id
+            FROM enrollments
+            WHERE subject_id=?
+            AND month=?
+            AND status='ACTIVE'
+        """, (subject_id, month))
+
+        students = cur.fetchall()
+
+        cur.executemany("""
+            INSERT INTO direct_messages
+            (from_role, from_id, to_role, to_id, subject_id, body, created_at)
+            VALUES ('tutor', ?, 'student', ?, ?, ?, ?)
+        """, [(tid, s['student_id'], subject_id, body, now) for s in students])
+
+        conn.commit()
+        conn.close()
+
+        return redirect(url_for('tutor_home'))
+
+    # ========================
+    # SEND TO INDIVIDUAL STUDENT
+    # ========================
     try:
-        student_id_str, subject_id_str = combo.split('|',1)
-        student_id=int(student_id_str); subject_id=int(subject_id_str)
-    except Exception:
-        return page("Error", card_msg("Bad selection."))
-    conn=get_db(); cur=conn.cursor()
-    # verify tutor teaches subject and student is ACTIVE there
-    month=get_setting('current_month')
-    cur.execute("SELECT 1 FROM tutor_subjects WHERE tutor_id=? AND subject_id=?", (tid,subject_id))
+        student_id_str, subject_id_str = combo.split('|', 1)
+        student_id = int(student_id_str)
+        subject_id = int(subject_id_str)
+    except:
+        conn.close()
+        return page("Error", card_msg("Invalid selection."))
+
+    # verify tutor teaches subject
+    cur.execute("""
+        SELECT 1
+        FROM tutor_subjects
+        WHERE tutor_id=? AND subject_id=?
+    """, (tid, subject_id))
+
     if not cur.fetchone():
-        conn.close(); return page("Error", card_msg("You are not assigned to that subject."))
-    cur.execute("""SELECT 1 FROM enrollments WHERE student_id=? AND subject_id=? AND month=? AND status='ACTIVE'""",(student_id,subject_id,month))
+        conn.close()
+        return page("Error", card_msg("Not allowed."))
+
+    # verify student active
+    cur.execute("""
+        SELECT 1
+        FROM enrollments
+        WHERE student_id=?
+        AND subject_id=?
+        AND month=?
+        AND status='ACTIVE'
+    """, (student_id, subject_id, month))
+
     if not cur.fetchone():
-        conn.close(); return page("Error", card_msg("Student not ACTIVE in that subject this month."))
-    cur.execute("INSERT INTO direct_messages(from_role,from_id,to_role,to_id,subject_id,body,created_at) VALUES('tutor',?,?,?,?,?,?)",
-                (tid,'student',student_id,subject_id,body,now_utc_iso()))
-    conn.commit(); conn.close()
+        conn.close()
+        return page("Error", card_msg("Student not active."))
+
+    cur.execute("""
+        INSERT INTO direct_messages
+        (from_role, from_id, to_role, to_id, subject_id, body, created_at)
+        VALUES ('tutor', ?, 'student', ?, ?, ?, ?)
+    """, (tid, student_id, subject_id, body, now))
+
+    conn.commit()
+    conn.close()
+
     return redirect(url_for('tutor_home'))
+
 
 # Tutor → Admin message
 @app.post('/tutor/message-admin')
@@ -4276,7 +4596,6 @@ def admin_nav():
         <a class="btn secondary" href="{url_for('admin_sessions')}">Sessions</a>
         <a class="btn secondary" href="{url_for('admin_messages')}">Inbox</a>
         <a class="btn secondary" href="{url_for('admin_direct_messages')}">Direct Msgs</a>
-        <a class="btn secondary" href="{url_for('admin_analytics')}">Analytics</a>
         <a class="btn secondary" href="{url_for('admin_settings')}">Settings</a>
     </nav>
     """
@@ -4310,7 +4629,6 @@ def admin_home():
     <a class='btn secondary' href='{url_for('admin_sessions')}'>Sessions & QR</a>
     <a class='btn secondary' href='{url_for('admin_messages')}'>Inbox</a>
     <a class='btn secondary' href='{url_for('admin_direct_messages')}'>Direct messages</a>
-    <a class='btn secondary' href='{url_for('admin_analytics')}'>Analytics</a>
     <a class='btn secondary' href='{url_for('admin_settings')}'>Settings</a>
     </div></section>"""
     return page("Admin", body)
@@ -4337,7 +4655,7 @@ def admin_enrollments():
     year = month.split('-')[0]
 
     page_num = int(request.args.get("page", 1))
-    limit = 50
+    limit = 30
     offset = (page_num - 1) * limit
 
     conn = get_db()
@@ -4404,12 +4722,15 @@ def admin_enrollments():
             <td><strong>R{r['amount_paid']}</strong></td>
             <td>
                 <form method='post' action='{url_for('enrollment_action', id=r['id'], action='approve')}' style='display:inline'>
+                    <input type="hidden" name="page" value="{page_num}">
                     <button class='btn success'>Approve</button>
                 </form>
                 <form method='post' action='{url_for('enrollment_action', id=r['id'], action='lapse')}' style='display:inline'>
+                    <input type="hidden" name="page" value="{page_num}">
                     <button class='btn danger'>Lapse</button>
                 </form>
             </td>
+
             <td>
                 <a class='links' target='_blank'
                    href='{url_for('status', id=r['id'])}?{urlencode({'token': r['status_token']})}'>
@@ -4476,6 +4797,8 @@ def enrollment_action(id: int, action: str):
     r = require_admin()
     if r:
         return r
+        
+    page_num = int(request.form.get("page", 1))
     conn = get_db()
     cur = conn.cursor()
 
@@ -4588,7 +4911,7 @@ def enrollment_action(id: int, action: str):
         # Never break the admin flow if notifications fail
         pass
 
-    return redirect(url_for('admin_enrollments'))
+    return redirect(url_for('admin_enrollments', page=page_num))
 
 # --- Admin: Students (show Guardian & Email) ---
 
@@ -4599,7 +4922,7 @@ def admin_students():
         return r
 
     page_num = int(request.args.get("page", 1))
-    limit = 50
+    limit = 30
     offset = (page_num - 1) * limit
 
     conn = get_db()
@@ -5271,69 +5594,195 @@ def admin_sessions():
     r = require_admin()
     if r:
         return r
+
     conn = get_db()
     cur = conn.cursor()
+
     cur.execute("SELECT id,name,grade FROM subjects ORDER BY grade,name")
     subjects = cur.fetchall()
+
     cur.execute("""
-    SELECT se.*, s.name AS subject_name, s.grade, t.full_name AS tutor_name, t.phone AS tutor_phone
+    SELECT se.*, 
+           s.name AS subject_name, 
+           s.grade,
+           t.full_name AS tutor_name, 
+           t.phone AS tutor_phone
     FROM sessions se
-    JOIN subjects s ON s.id=se.subject_id
-    JOIN tutors t ON t.id=se.tutor_id
-    ORDER BY se.day_of_week, se.start_time
+    JOIN subjects s ON s.id = se.subject_id
+    JOIN tutors t ON t.id = se.tutor_id
+
+    ORDER BY
+        CAST(REPLACE(s.grade, 'G', '') AS INTEGER) ASC,
+        s.name ASC,
+        se.day_of_week ASC,
+        se.start_time ASC
     """)
+
     sessions_rows = cur.fetchall()
+
     conn.close()
 
-    options = ''.join([f"<option value='{s['id']}'>{s['grade']} — {s['name']}</option>" for s in subjects])
-    dow_opts = ''.join([f"<option value='{i}'>{d}</option>" for i, d in enumerate(DOW)])
-    rows = ''.join(
-        [
-            (
-                f"<tr>"
-                f"<td>{grade_label(r['grade'])} — {r['subject_name']}</td>"
-                f"<td>{r['tutor_name']} ({r['tutor_phone']})</td>"
-                f"<td>{DOW[r['day_of_week']]} {r['start_time']}-{r['end_time']}</td>"
-                f"<td>"
-                f"{'<span class=\"chip active\">Shown</span>' if r['active'] == 1 else '<span class=\"chip lapsed\">Hidden</span>'}"
-                f"</td>"
-                f"<td>"
-                f"<a class='links' href='{url_for('session_qr', id=r['id'])}'>QR</a> · "
-                f"<form method='post' action='{url_for('admin_session_toggle', sid=r['id'])}' style='display:inline'>"
-                f"<button class='btn mini secondary'>{'Hide' if r['active'] == 1 else 'Show'}</button>"
-                f"</form> · "
-                f"<form method='post' action='{url_for('admin_session_delete', sid=r['id'])}' "
-                f"style='display:inline' onsubmit='return confirm(\"Delete this session?\")'>"
-                f"<button class='btn danger mini'>Delete</button>"
-                f"</form>"
-                f"</td>"
-                f"</tr>"
-            )
-            for r in sessions_rows
-        ]
-    ) or "<tr><td colspan='5'><div class='empty'>No sessions.</div></td></tr>"
+    options = ''.join([
+        f"<option value='{s['id']}'>{s['grade']} — {s['name']}</option>"
+        for s in subjects
+    ])
 
+    dow_opts = ''.join([
+        f"<option value='{i}'>{d}</option>"
+        for i, d in enumerate(DOW)
+    ])
+
+    rows = ''.join([
+        f"""
+        <tr>
+            <td>{grade_label(r['grade'])} — {r['subject_name']}</td>
+
+            <td>
+                {r['tutor_name']}<br>
+                <span class='mini muted'>{r['tutor_phone']}</span>
+            </td>
+
+            <td>
+                {DOW[r['day_of_week']]}<br>
+                <span class='mini muted'>
+                    {r['start_time']} - {r['end_time']}
+                </span>
+            </td>
+
+            <!-- NEW TEST LINK COLUMN -->
+            <td>
+                {
+                    f"<a class='btn mini success' target='_blank' href='{r['meet_link']}'>Open</a>"
+                    if r['meet_link']
+                    else "<span class='muted mini'>No link</span>"
+                }
+            </td>
+
+            <td>
+                {
+                    '<span class="chip active">Shown</span>'
+                    if r['active'] == 1
+                    else '<span class="chip lapsed">Hidden</span>'
+                }
+            </td>
+
+            <td>
+                <a class='links' href='{url_for('session_qr', id=r['id'])}'>QR</a>
+
+                ·
+
+                <form method='post'
+                      action='{url_for('admin_session_toggle', sid=r['id'])}'
+                      style='display:inline'>
+
+                    <button class='btn mini secondary'>
+                        {'Hide' if r['active'] == 1 else 'Show'}
+                    </button>
+
+                </form>
+
+                ·
+
+                <form method='post'
+                      action='{url_for('admin_session_delete', sid=r['id'])}'
+                      style='display:inline'
+                      onsubmit='return confirm("Delete this session?")'>
+
+                    <button class='btn danger mini'>Delete</button>
+
+                </form>
+
+            </td>
+
+        </tr>
+        """
+        for r in sessions_rows
+    ]) or "<tr><td colspan='6'><div class='empty'>No sessions.</div></td></tr>"
 
 
     body = f"""
     {admin_nav()}
+
     <section class='card'>
+
         <h1>Sessions</h1>
-        <form class='grid' method='post' action='{url_for('admin_sessions_post')}'>
-        <div style='display:grid;grid-template-columns:1fr 1fr 110px 110px 1fr auto;gap:10px'>
-            <select name='subject_id'>{options}</select>
-            <input name='tutor_name' placeholder='Tutor name' required />
-            <select name='dow'>{dow_opts}</select>
-            <input name='start' placeholder='Start HH:MM' required />
-            <input name='end' placeholder='End HH:MM' required />
-            <input name='tutor_phone' placeholder='Tutor phone' required />
-            <input name='meet' placeholder='Meet link (optional)' />
-            <button class='btn'>Add</button>
-        </div>
+
+        <form class='grid'
+              method='post'
+              action='{url_for('admin_sessions_post')}'>
+
+            <div style='display:grid;
+                        grid-template-columns:1fr 1fr 110px 110px 1fr auto;
+                        gap:10px'>
+
+                <select name='subject_id'>{options}</select>
+
+                <input name='tutor_name'
+                       placeholder='Tutor name'
+                       required />
+
+                <select name='dow'>{dow_opts}</select>
+
+                <input name='start'
+                       placeholder='Start HH:MM'
+                       required />
+
+                <input name='end'
+                       placeholder='End HH:MM'
+                       required />
+
+                <input name='tutor_phone'
+                       placeholder='Tutor phone'
+                       required />
+
+                <input name='meet'
+                       placeholder='Meet link (optional)' />
+
+                <button class='btn'>Add</button>
+
+            </div>
+
         </form>
-        <div class="scroll-x"><table><thead><tr><th>Subject</th><th>Tutor</th><th>When</th><th>Visibility</th><th>Actions</th></thead><tbody>{rows}</tbody></table></div>
+
+
+        <div class="scroll-x">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>Subject</th>
+
+                        <th>Tutor</th>
+
+                        <th>When</th>
+
+                        <!-- NEW COLUMN -->
+                        <th>Test link</th>
+
+                        <th>Visibility</th>
+
+                        <th>Actions</th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                    {rows}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
     </section>
     """
+
     return page("Sessions", body)
     
 
@@ -5371,19 +5820,40 @@ def admin_sessions_post():
 
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id FROM tutors WHERE full_name=?", (tutor_name,))
+    # First try find tutor by PHONE (most reliable unique field)
+    cur.execute("SELECT id FROM tutors WHERE phone=?", (tutor_phone,))
     row = cur.fetchone()
-    tutor_id = row['id'] if row else None
-    if not tutor_id:
+
+    if row:
+        tutor_id = row['id']
+
+        cur.execute("""
+            UPDATE tutors
+            SET full_name=?
+            WHERE id=?
+        """, (tutor_name, tutor_id))
+
+
+    else:
+        # If not found, create new tutor safely
         pins = set()
+
         cur.execute("SELECT pin FROM students WHERE pin IS NOT NULL")
         pins |= {r['pin'] for r in cur.fetchall()}
+
         cur.execute("SELECT pin FROM tutors WHERE pin IS NOT NULL")
         pins |= {r['pin'] for r in cur.fetchall()}
+
         pin = gen_pin(pins)
         now = now_utc_iso()
-        cur.execute("INSERT INTO tutors(full_name,phone,pin,created_at) VALUES(?,?,?,?)", (tutor_name, tutor_phone, pin, now))
+
+        cur.execute("""
+            INSERT INTO tutors(full_name, phone, pin, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (tutor_name, tutor_phone, pin, now))
+
         tutor_id = cur.lastrowid
+
     cur.execute("""
     INSERT INTO sessions(subject_id,tutor_id,day_of_week,start_time,end_time,meet_link)
     VALUES(?,?,?,?,?,?)
@@ -5542,130 +6012,462 @@ def format_datime(ts):
 
 @app.get('/admin/messages')
 def admin_messages():
+
     r = require_admin()
     if r:
         return r
+
+    import json
+    import re
+
+    page_num = int(request.args.get("page", 1))
+    q = request.args.get("q", "").strip()
+
+    limit = 50
+    offset = (page_num - 1) * limit
+
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id,kind,payload,created_at,resolved FROM messages ORDER BY created_at DESC")
+
+    # COUNT
+    if q:
+        cur.execute("""
+            SELECT COUNT(*) AS c
+            FROM messages
+            WHERE kind LIKE ? OR payload LIKE ?
+        """, (f"%{q}%", f"%{q}%"))
+    else:
+        cur.execute("SELECT COUNT(*) AS c FROM messages")
+
+    total = cur.fetchone()['c']
+    total_pages = max(1, (total + limit - 1) // limit)
+
+    # FETCH
+    if q:
+        cur.execute("""
+            SELECT id, kind, payload, created_at, resolved
+            FROM messages
+            WHERE kind LIKE ? OR payload LIKE ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """, (f"%{q}%", f"%{q}%", limit, offset))
+    else:
+        cur.execute("""
+            SELECT id, kind, payload, created_at, resolved
+            FROM messages
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+
     rows = cur.fetchall()
-    conn.close()
+
     trs = []
+
     for m in rows:
-        status = "<span class='chip active'>Open</span>" if m['resolved'] == 0 else "<span class='chip'>Resolved</span>"
-        action = "" if m['resolved'] else f"""
-            <form method='post' action='{url_for('admin_message_resolve', mid=m['id'])}' style='display:inline'>
-                <button class='btn success'>Mark resolved</button>
-            </form>
-        """
 
         when = format_datime(m['created_at'])
 
+        status = (
+            "<span class='chip active'>Open</span>"
+            if m['resolved'] == 0
+            else "<span class='chip'>Resolved</span>"
+        )
+
+        action = "" if m['resolved'] else f"""
+            <form method='post'
+                  action='{url_for('admin_message_resolve', mid=m['id'])}'
+                  style='display:inline'>
+                <input type="hidden" name="page" value="{page_num}">
+                <input type="hidden" name="q" value="{q}">
+                <button class='btn success mini'>Mark resolved</button>
+            </form>
+        """
+
+        payload = m['payload']
+        phone = None
+
+        # --- TRY JSON ---
+        try:
+            data = json.loads(payload)
+            phone = data.get("phone") or data.get("phone_whatsapp")
+        except:
+            pass
+
+        # --- TRY TEXT FORMAT phone=082... ---
+        if not phone:
+            match = re.search(r'phone\s*=\s*(\d+)', payload)
+            if match:
+                phone = match.group(1)
+
+        # --- LOOKUP STUDENT ---
+        if phone:
+
+            cur.execute("""
+                SELECT full_name, phone_whatsapp, pin
+                FROM students
+                WHERE phone_whatsapp=?
+            """, (phone,))
+
+            student = cur.fetchone()
+
+            if student:
+
+                pin = student['pin'] if student['pin'] else "Not enrolled"
+
+                payload_display = f"""
+                <div><b>Name:</b> {student['full_name']}</div>
+                <div><b>Phone:</b> {student['phone_whatsapp']}</div>
+                <div><b>PIN:</b> {pin}</div>
+                """
+
+            else:
+
+                payload_display = f"""
+                <div><b>Phone:</b> {phone}</div>
+                <div><b>PIN:</b> Not enrolled</div>
+                """
+
+        else:
+
+            payload_display = payload
+
         trs.append(f"""
-            <tr>
-                <td>{m['kind']}</td>
-                <td>{m['payload']}</td>
-                <td class='mini muted'>{when}</td>
-                <td>{status}</td>
-                <td>{action}</td>
-            </tr>
+        <tr>
+            <td>{m['kind']}</td>
+            <td>{payload_display}</td>
+            <td class='mini muted'>{when}</td>
+            <td>{status}</td>
+            <td>{action}</td>
+        </tr>
         """)
 
+    conn.close()
+
+    nav = f"""
+    <div class='pager' style="margin:10px 0">
+        Page {page_num} of {total_pages}
+        {"<a class='links' href='?page="+str(page_num-1)+"&q="+q+"'>Prev</a>" if page_num>1 else ""}
+        {"<a class='links' href='?page="+str(page_num+1)+"&q="+q+"'>Next</a>" if page_num<total_pages else ""}
+    </div>
+    """
 
     body = f"""
     {admin_nav()}
+
     <section class='card'>
-        <h1>Admin inbox</h1>
+
+        <h1>Admin Inbox</h1>
+
+        <form method="get" class="toolbar">
+            <input name="q" class="pill" placeholder="Search..." value="{q}">
+            <button class="btn mini">Search</button>
+        </form>
+
+        {nav}
+
         <div class="scroll-x">
             <table>
-            <thead><tr><th>Type</th><th>Payload</th><th>When</th><th>Status</th><th>Action</th></tr></thead>
-            <tbody>{''.join(trs) if trs else "<tr><td colspan='5'><div class='empty'>No messages.</div></td></tr>"}</tbody>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Student Info</th>
+                        <th>When</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(trs)}
+                </tbody>
             </table>
         </div>
+
+        {nav}
+
     </section>
     """
+
     return page("Messages", body)
+
+
 
 @app.post('/admin/messages/<int:mid>/resolve')
 def admin_message_resolve(mid:int):
     r = require_admin()
     if r:
         return r
+
+    page_num = request.form.get("page", 1)
+    q = request.form.get("q", "")
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("UPDATE messages SET resolved=1 WHERE id=?", (mid,))
     conn.commit()
     conn.close()
-    return redirect(url_for('admin_messages'))
+
+    return redirect(url_for('admin_messages', page=page_num, q=q))
+
+
 
 # --- Admin: Direct Messages (student/tutor DMs) ---
 
 @app.get('/admin/direct-messages')
 def admin_direct_messages():
-    r=require_admin()
-    if r: return r
-    conn=get_db(); cur=conn.cursor()
-    cur.execute("""SELECT dm.*,
-                        CASE dm.from_role 
-                            WHEN 'tutor' THEN (SELECT full_name FROM tutors WHERE id=dm.from_id)
-                            WHEN 'student' THEN (SELECT full_name FROM students WHERE id=dm.from_id)
-                            ELSE 'Admin' END AS from_name,
-                        CASE dm.to_role 
-                            WHEN 'tutor' THEN (SELECT full_name FROM tutors WHERE id=dm.to_id)
-                            WHEN 'student' THEN (SELECT full_name FROM students WHERE id=dm.to_id)
-                            ELSE 'Admin' END AS to_name
-                FROM direct_messages dm
-                ORDER BY dm.created_at ASC LIMIT 80""")
-    dms=cur.fetchall()
-    # mark those to admin as read
-    cur.execute("UPDATE direct_messages SET is_read=1 WHERE to_role='admin'")
-    # lists for compose
-    cur.execute("SELECT id,full_name FROM tutors ORDER BY full_name"); tutors=cur.fetchall()
-    cur.execute("SELECT id,full_name FROM students ORDER BY full_name"); students=cur.fetchall()
-    conn.commit(); conn.close()
 
-    dm_list = "".join([f"<div class='msg {'me' if m['from_role']=='admin' else 'them'}'><div class='meta'>{m['from_name']} → {m['to_name']} • {m['created_at'][:16].replace('T',' ')}</div><div>{m['body']}</div></div>" for m in dms]) or "<div class='empty'>No messages yet.</div>"
+    r = require_admin()
+    if r:
+        return r
 
-    tut_opts="".join([f"<option value='tutor|{t['id']}'>{t['full_name']}</option>" for t in tutors])
-    stu_opts="".join([f"<option value='student|{s['id']}'>{s['full_name']}</option>" for s in students])
-    body=fr"""
-    {admin_nav()}
-    <section class='grid'>
-        <div class='card'><h1>Direct messages</h1>
-        <form method='post' action='{url_for('admin_send_dm')}' class='grid'>
-            <div><label>To (Tutor/Student)</label>
-            <select name='target' required>
-                <optgroup label='Tutors'>{tut_opts}</optgroup>
-                <optgroup label='Students'>{stu_opts}</optgroup>
-            </select>
+    page_num = int(request.args.get("page", 1))
+    limit = 30
+    offset = (page_num - 1) * limit
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # =========================
+    # TOTAL COUNT
+    # =========================
+
+    cur.execute("SELECT COUNT(*) AS c FROM direct_messages")
+    total = cur.fetchone()['c']
+    total_pages = (total + limit - 1) // limit
+
+
+    # =========================
+    # LOAD PAGINATED MESSAGES
+    # =========================
+
+    cur.execute("""
+        SELECT dm.*,
+
+            CASE dm.from_role 
+                WHEN 'tutor' THEN (SELECT full_name FROM tutors WHERE id=dm.from_id)
+                WHEN 'student' THEN (SELECT full_name FROM students WHERE id=dm.from_id)
+                ELSE 'Admin'
+            END AS from_name,
+
+            CASE dm.to_role 
+                WHEN 'tutor' THEN (SELECT full_name FROM tutors WHERE id=dm.to_id)
+                WHEN 'student' THEN (SELECT full_name FROM students WHERE id=dm.to_id)
+                ELSE 'Admin'
+            END AS to_name
+
+        FROM direct_messages dm
+
+        ORDER BY dm.created_at DESC
+
+        LIMIT ? OFFSET ?
+    """, (limit, offset))
+
+    dms = cur.fetchall()
+
+
+    # mark admin messages as read
+    cur.execute("""
+        UPDATE direct_messages
+        SET is_read = 1
+        WHERE to_role = 'admin'
+    """)
+
+
+    # =========================
+    # RECIPIENT LISTS
+    # =========================
+
+    cur.execute("SELECT id, full_name FROM tutors ORDER BY full_name")
+    tutors = cur.fetchall()
+
+    cur.execute("SELECT id, full_name FROM students ORDER BY full_name")
+    students = cur.fetchall()
+
+    conn.commit()
+    conn.close()
+
+
+    # =========================
+    # MESSAGE LIST DISPLAY
+    # =========================
+
+    dm_list = "".join([
+        f"""
+        <div class='msg {'me' if m['from_role']=='admin' else 'them'}'>
+
+            <div class='meta'>
+                {m['from_name']} → {m['to_name']}
+                • {m['created_at'][:16].replace('T',' ')}
             </div>
-            <div><label>Message</label><textarea name='body' required placeholder='Type your message...'></textarea></div>
-            <button class='btn'>Send</button>
-        </form>
-        <div style='margin-top:10px'>{dm_list}</div>
+
+            <div>{m['body']}</div>
+
         </div>
+        """
+        for m in dms
+    ]) or "<div class='empty'>No messages yet.</div>"
+
+
+    # =========================
+    # PAGINATION NAV
+    # =========================
+
+    nav = f"""
+    <div class='pager' style="margin:10px 0">
+
+        Page {page_num} of {total_pages}
+
+        {"<a class='links' href='?page="+str(page_num-1)+"'>Prev</a>" if page_num>1 else ""}
+
+        {"<a class='links' href='?page="+str(page_num+1)+"'>Next</a>" if page_num<total_pages else ""}
+
+    </div>
+    """
+
+
+    # =========================
+    # DROPDOWN OPTIONS
+    # =========================
+
+    tut_opts = "".join([
+        f"<option value='tutor|{t['id']}'>{t['full_name']}</option>"
+        for t in tutors
+    ])
+
+    stu_opts = "".join([
+        f"<option value='student|{s['id']}'>{s['full_name']}</option>"
+        for s in students
+    ])
+
+
+    # =========================
+    # PAGE BODY
+    # =========================
+
+    body = f"""
+    {admin_nav()}
+
+    <section class='grid'>
+
+        <div class='card'>
+
+            <h1>Direct Messages</h1>
+
+            <form method='post'
+                  action='{url_for('admin_send_dm')}'
+                  class='grid'>
+
+                <input type="hidden" name="page" value="{page_num}">
+
+                <div>
+
+                    <label>Send to</label>
+
+                    <select name='target' required>
+
+                        <optgroup label='Broadcast'>
+                            <option value='ALL_TUTORS'>All Tutors</option>
+                            <option value='ALL_STUDENTS'>All Students</option>
+                        </optgroup>
+
+                        <optgroup label='Tutors'>
+                            {tut_opts}
+                        </optgroup>
+
+                        <optgroup label='Students'>
+                            {stu_opts}
+                        </optgroup>
+
+                    </select>
+
+                </div>
+
+                <div>
+                    <label>Message</label>
+                    <textarea name='body'
+                              required
+                              placeholder='Type your message...'></textarea>
+                </div>
+
+                <button class='btn'>Send</button>
+
+            </form>
+
+            {nav}
+
+            <div style='margin-top:15px'>
+                {dm_list}
+            </div>
+
+            {nav}
+
+        </div>
+
     </section>
     """
+
     return page("Direct Messages", body)
+
+
 
 @app.post('/admin/direct-messages/send')
 def admin_send_dm():
-    r=require_admin()
-    if r: return r
-    target=request.form.get('target','')
-    body=request.form.get('body','').strip()
-    if not (target and body): return page("Error", card_msg("Select a recipient and write a message."))
-    try:
-        role, id_str = target.split('|',1)
+
+    r = require_admin()
+    if r:
+        return r
+
+    page_num = request.form.get("page", 1)
+
+    target = request.form.get('target', '')
+    body = request.form.get('body', '').strip()
+
+    if not body:
+        return page("Error", card_msg("Message cannot be empty."))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    now = now_utc_iso()
+
+    if target == "ALL_TUTORS":
+
+        cur.execute("SELECT id FROM tutors")
+        tutors = cur.fetchall()
+
+        cur.executemany("""
+            INSERT INTO direct_messages
+            (from_role, from_id, to_role, to_id, subject_id, body, created_at)
+            VALUES ('admin', 0, 'tutor', ?, NULL, ?, ?)
+        """, [(t['id'], body, now) for t in tutors])
+
+    elif target == "ALL_STUDENTS":
+
+        cur.execute("SELECT id FROM students")
+        students = cur.fetchall()
+
+        cur.executemany("""
+            INSERT INTO direct_messages
+            (from_role, from_id, to_role, to_id, subject_id, body, created_at)
+            VALUES ('admin', 0, 'student', ?, NULL, ?, ?)
+        """, [(s['id'], body, now) for s in students])
+
+    else:
+
+        role, id_str = target.split('|', 1)
         rid = int(id_str)
-    except Exception:
-        return page("Error", card_msg("Bad recipient."))
-    if role not in ('student','tutor'): return page("Error", card_msg("Bad role."))
-    conn=get_db(); cur=conn.cursor()
-    cur.execute("INSERT INTO direct_messages(from_role,from_id,to_role,to_id,subject_id,body,created_at) VALUES('admin',0,?,?,NULL,?,?)",
-                (role, rid, body, now_utc_iso()))
-    conn.commit(); conn.close()
-    return redirect(url_for('admin_direct_messages'))
+
+        cur.execute("""
+            INSERT INTO direct_messages
+            (from_role, from_id, to_role, to_id, subject_id, body, created_at)
+            VALUES ('admin', 0, ?, ?, NULL, ?, ?)
+        """, (role, rid, body, now))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for('admin_direct_messages', page=page_num))
+
+
 
 # --- Admin: Analytics dashboard ---
 
@@ -5692,7 +6494,20 @@ def admin_analytics():
     active = count_status('ACTIVE')
     lapsed = count_status('LAPSED')
 
-    cur.execute("SELECT SUM(amount_paid) AS r FROM enrollments WHERE month=? AND status='ACTIVE'", (month,))
+    # ===== TRUE REVENUE (distributed) =====
+    cur.execute("""
+        SELECT ROUND(SUM(
+            e.amount_paid * 1.0 / (
+                SELECT COUNT(*)
+                FROM enrollments e2
+                WHERE e2.student_id = e.student_id
+                  AND e2.month = e.month
+                  AND e2.status = 'ACTIVE'
+            )
+        ), 2) AS r
+        FROM enrollments e
+        WHERE e.month=? AND e.status='ACTIVE'
+    """, (month,))
     revenue = cur.fetchone()['r'] or 0
 
     # ===== New vs Returning =====
@@ -5716,11 +6531,20 @@ def admin_analytics():
     """, (month, month))
     returning = cur.fetchone()[0] or 0
 
-    # ===== Revenue trend (per selected month, per day) =====
+    # ===== Revenue trend (per day, corrected) =====
     cur.execute("""
-        SELECT substr(created_at,1,10) AS day, SUM(amount_paid) AS r
-        FROM enrollments
-        WHERE month=? AND status='ACTIVE'
+        SELECT substr(e.created_at,1,10) AS day,
+               ROUND(SUM(
+                   e.amount_paid * 1.0 / (
+                       SELECT COUNT(*)
+                       FROM enrollments e2
+                       WHERE e2.student_id = e.student_id
+                         AND e2.month = e.month
+                         AND e2.status = 'ACTIVE'
+                   )
+               ), 2) AS r
+        FROM enrollments e
+        WHERE e.month=? AND e.status='ACTIVE'
         GROUP BY day ORDER BY day
     """, (month,))
     rev_rows = cur.fetchall()
@@ -5738,9 +6562,18 @@ def admin_analytics():
     att_labels = [r['date'] for r in att_rows]
     att_data = [r['c'] for r in att_rows]
 
-    # ===== Revenue per subject =====
+    # ===== Revenue per subject (corrected) =====
     cur.execute("""
-        SELECT s.name || ' (' || s.grade || ')' AS label, SUM(e.amount_paid) AS r
+        SELECT s.name || ' (' || s.grade || ')' AS label,
+               ROUND(SUM(
+                   e.amount_paid * 1.0 / (
+                       SELECT COUNT(*)
+                       FROM enrollments e2
+                       WHERE e2.student_id = e.student_id
+                         AND e2.month = e.month
+                         AND e2.status = 'ACTIVE'
+                   )
+               ), 2) AS r
         FROM enrollments e
         JOIN subjects s ON s.id=e.subject_id
         WHERE e.month=? AND e.status='ACTIVE'
@@ -5753,7 +6586,7 @@ def admin_analytics():
 
     # ===== Top rated tutors =====
     cur.execute("""
-        SELECT t.full_name, AVG(l.rating) AS avg_rating
+        SELECT t.full_name, ROUND(AVG(l.rating),2) AS avg_rating
         FROM lesson_ratings l
         JOIN tutor_subjects ts ON ts.subject_id=l.subject_id
         JOIN tutors t ON t.id=ts.tutor_id
@@ -5763,7 +6596,7 @@ def admin_analytics():
     """, (month,))
     tutor_rows = cur.fetchall()
     tutor_labels = [r['full_name'] for r in tutor_rows]
-    tutor_data = [round(r['avg_rating'],2) for r in tutor_rows]
+    tutor_data = [r['avg_rating'] for r in tutor_rows]
 
     # ===== Subject performance table =====
     cur.execute("SELECT id,name,grade FROM subjects ORDER BY grade,name")
@@ -5771,12 +6604,19 @@ def admin_analytics():
 
     rows=[]
     for s in subs:
-        cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE subject_id=? AND month=? AND status='ACTIVE'", (s['id'], month))
+        cur.execute("""
+            SELECT COUNT(*) AS c
+            FROM enrollments
+            WHERE subject_id=? AND month=? AND status='ACTIVE'
+        """, (s['id'], month))
         active_students = cur.fetchone()['c'] or 0
 
-        cur.execute("""SELECT COUNT(*) AS c FROM attendance a
-                       JOIN sessions se ON se.id=a.session_id
-                       WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?""", (s['id'], month))
+        cur.execute("""
+            SELECT COUNT(*) AS c
+            FROM attendance a
+            JOIN sessions se ON se.id=a.session_id
+            WHERE se.subject_id=? AND strftime('%Y-%m', a.date)=?
+        """, (s['id'], month))
         att = cur.fetchone()['c'] or 0
 
         rows.append(f"""
@@ -5910,7 +6750,7 @@ def admin_analytics():
     """
 
     return page("Analytics Dashboard", body)
- 
+
 # --- Export remove list ---
 
 @app.get('/api/export/remove-list')
