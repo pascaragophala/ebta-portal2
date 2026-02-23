@@ -3639,7 +3639,7 @@ def student_login():
                     <option value="INT">International</option>
                 </select>
 
-                <input name='phone' required/>
+                <input name='phone' required placeholder="Enter your WhatsApp number here"/>
             </div>
 
             <div>
