@@ -2516,6 +2516,12 @@ def home():
                    required
                    placeholder="0821234567 or +447911123456">
             </div>
+            
+            <div>
+            <label>Guardian Name & Surname</label>
+            <input name="guardian_name" required />
+            </div>
+            
             <div>
             <label>Guardian WhatsApp Number</label>
 
@@ -2528,10 +2534,7 @@ def home():
                    id="guardian_input"
                    required>
             </div>
-            <div>
-            <label>Guardian WhatsApp Number</label>
-            <input name='guardian' required/>
-            </div>
+ 
             <div>
             <label>Student Email (optional)</label>
             <input name='email'/>
