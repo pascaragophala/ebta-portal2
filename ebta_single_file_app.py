@@ -2514,7 +2514,7 @@ def home():
             <input name="phone"
                    id="phone_input"
                    required
-                   placeholder="0821234567 or +447911123456">
+                   placeholder="Enter your number here">
             </div>
             
             <div>
@@ -2533,6 +2533,7 @@ def home():
             <input name="guardian"
                    id="guardian_input"
                    required>
+                   placeholder="Enter your guardian number here">
             </div>
  
             <div>
