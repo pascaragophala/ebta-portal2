@@ -319,6 +319,9 @@ def init_db():
         resolved INTEGER NOT NULL DEFAULT 0
     );
     """)
+    
+    # THEN indexes
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC)")    
 
     # Students rate their classes monthly (24th to end-of-month)
     cur.execute("""
