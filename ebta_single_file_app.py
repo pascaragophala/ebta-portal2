@@ -2532,7 +2532,7 @@ def home():
 
             <input name="guardian"
                    id="guardian_input"
-                   required>
+                   required
                    placeholder="Enter your guardian number here">
             </div>
  
