@@ -3235,7 +3235,7 @@ def register():
     try:
         phone = normalize_phone(request.form.get("phone",""), phone_type, strict=True)
 
-        guardian = normalize_phone(request.form.get("guardian",""),guardian_phone_type)
+        guardian = normalize_phone(request.form.get("guardian",""),guardian_phone_type, strict=True)
         
     except ValueError as e:
         return page("Error", card_msg(str(e)))
