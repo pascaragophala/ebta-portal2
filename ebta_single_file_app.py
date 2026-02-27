@@ -652,29 +652,24 @@ def normalize_phone(phone: str, phone_type: str = "SA") -> str:
         return ""
 
     phone = str(phone).strip()
-
-    # remove spaces, brackets, dashes
     phone = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
 
-    if phone_type == "INT":
-        # International numbers must start with +
-        if not phone.startswith("+"):
-            phone = "+" + ''.join(ch for ch in phone if ch.isdigit())
-        return phone
-
-    # Default: South Africa normalization
     digits = ''.join(ch for ch in phone if ch.isdigit())
 
-    if digits.startswith("0") and len(digits) == 10:
-        return "+27" + digits[1:]
+    if phone_type == "INT":
+        if not phone.startswith("+"):
+            return "+" + digits
+        return phone
 
-    if digits.startswith("27") and len(digits) == 11:
-        return "+" + digits
+    # SOUTH AFRICAN VALIDATION
+    if len(digits) != 10:
+        raise ValueError("South African numbers must be exactly 10 digits.")
 
-    if digits.startswith("+27"):
-        return digits
+    if not digits.startswith("0"):
+        raise ValueError("South African numbers must start with 0.")
 
-    return digits
+    # Store in +27 format
+    return "+27" + digits[1:]
     
 def phone_variants(phone: str):
     """
@@ -2776,6 +2771,8 @@ function showPopup(message, type='info', timeout=4000){
     }
 
     form.addEventListener('submit', function(e){
+        const studentPhoneInput = document.getElementById("phone_input");
+        const guardianPhoneInput = document.getElementById("guardian_input");
         const termsCheck = document.getElementById('terms_check');
 
         if(!termsCheck || !termsCheck.checked){
@@ -2795,37 +2792,38 @@ function showPopup(message, type='info', timeout=4000){
         const guardianType =
             document.querySelector("select[name='guardian_phone_type']")?.value || "SA";
 
+
         function digitsOnly(str){
-            return (str||'').replace(/\D/g,'');
+            return (str ||'').replace(/\D/g,'');
         }
 
         // Student validation
         if(studentPhoneInput){
 
             if(studentType === "SA"){
-
                 const digits = digitsOnly(studentPhoneInput.value);
 
                 if(digits.length !== 10){
                     e.preventDefault();
-                    showPopup(
-                        "South African number must be 10 digits.",
-                        "error"
-                    );
+                    showPopup("South African number must be exactly 10 digits (e.g. 0821234567).","error");
+                    studentPhoneInput.focus();
                     return;
                 }
 
-            }else{
+                if(!digits.startsWith("0")){
+                    e.preventDefault();
+                    showPopup("South African number must start with 0.","error");
+                    studentPhoneInput.focus();
+                    return;
+                }
 
+            } else {
                 if(!studentPhoneInput.value.startsWith("+")){
                     e.preventDefault();
-                    showPopup(
-                        "International number must start with +",
-                        "error"
-                    );
+                    showPopup("International number must start with +","error");
+                    studentPhoneInput.focus();
                     return;
                 }
-
             }
         }
 
@@ -2833,31 +2831,32 @@ function showPopup(message, type='info', timeout=4000){
         if(guardianPhoneInput){
 
             if(guardianType === "SA"){
-
                 const digits = digitsOnly(guardianPhoneInput.value);
 
                 if(digits.length !== 10){
                     e.preventDefault();
-                    showPopup(
-                        "Guardian SA number must be 10 digits.",
-                        "error"
-                    );
+                    showPopup("Guardian SA number must be exactly 10 digits.","error");
+                    guardianPhoneInput.focus();
                     return;
                 }
 
-            }else{
+                if(!digits.startsWith("0")){
+                    e.preventDefault();
+                    showPopup("Guardian SA number must start with 0.","error");
+                    guardianPhoneInput.focus();
+                    return;
+                }
 
+            } else {
                 if(!guardianPhoneInput.value.startsWith("+")){
                     e.preventDefault();
-                    showPopup(
-                        "Guardian international number must start with +",
-                        "error"
-                    );
+                    showPopup("Guardian international number must start with +","error");
+                    guardianPhoneInput.focus();
                     return;
                 }
-
             }
         }
+        
         // Validate optional student email ends with @gmail.com if provided
         const emailInput = form.querySelector("input[name='email']") || form.querySelector("input[name='student_email']");
         if(emailInput && emailInput.value.trim() !== ''){
@@ -3224,15 +3223,19 @@ def register():
     phone_type = request.form.get("phone_type", "SA")
     guardian_phone_type = request.form.get("guardian_phone_type", "SA")
 
-    phone = normalize_phone(
-        request.form.get("phone",""),
-        phone_type
-    )
+    try:
+        phone = normalize_phone(
+            request.form.get("phone",""),
+            phone_type
+        )
 
-    guardian = normalize_phone(
-        request.form.get("guardian",""),
-        guardian_phone_type
-    )
+        guardian = normalize_phone(
+            request.form.get("guardian",""),
+            guardian_phone_type
+        )
+    except ValueError as e:
+        return page("Error", card_msg(str(e)))
+    
     guardian_name = request.form.get('guardian_name','').strip()
     email = request.form.get('email','').strip() or None
     subject_ids = request.form.getlist('subject_ids')
@@ -4126,7 +4129,7 @@ def student_home():
 
     assignments = []
     
-    if has_active_enrollment and active_sub_ids:
+    if active_sub_ids:
 
         cur.execute(f"""
             SELECT m.*, sub.name AS subject_name, sub.grade, t.full_name AS tutor_name
@@ -4134,9 +4137,18 @@ def student_home():
             JOIN subjects sub ON sub.id=m.subject_id
             JOIN tutors t ON t.id=m.tutor_id
             WHERE m.subject_id IN ({','.join('?'*len(active_sub_ids))})
-              AND m.month IN (?, ?)
+              AND (
+                    m.month = ?
+                    OR EXISTS (
+                        SELECT 1 FROM enrollments e
+                        WHERE e.student_id = ?
+                        AND e.subject_id = m.subject_id
+                        AND e.status = 'ACTIVE'
+                        AND e.month = m.month
+                    )
+              )
             ORDER BY sub.grade, sub.name, m.created_at DESC
-        """, (*active_sub_ids, month, system_month))
+        """, (*active_sub_ids, month, sid))
 
         mats = cur.fetchall()
         
