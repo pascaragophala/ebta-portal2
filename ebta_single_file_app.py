@@ -646,7 +646,7 @@ def secure_name(name):
     return ''.join(ch if ch in keep else '_' for ch in name)
 
 
-def normalize_phone(phone: str, phone_type: str = "SA") -> str:
+def normalize_phone(phone: str, phone_type: str = "SA", strict: bool = False) -> str:
 
     if not phone:
         return ""
@@ -656,20 +656,29 @@ def normalize_phone(phone: str, phone_type: str = "SA") -> str:
 
     digits = ''.join(ch for ch in phone if ch.isdigit())
 
+    # INTERNATIONAL
     if phone_type == "INT":
         if not phone.startswith("+"):
             return "+" + digits
         return phone
 
-    # SOUTH AFRICAN VALIDATION
-    if len(digits) != 10:
-        raise ValueError("South African numbers must be exactly 10 digits.")
+    # SOUTH AFRICA
+    # If already +27 format
+    if phone.startswith("+27") and len(digits) == 11:
+        return "+27" + digits[-9:]
 
-    if not digits.startswith("0"):
-        raise ValueError("South African numbers must start with 0.")
+    # If entered as 27XXXXXXXXX
+    if digits.startswith("27") and len(digits) == 11:
+        return "+27" + digits[2:]
 
-    # Store in +27 format
-    return "+27" + digits[1:]
+    # If entered as 0XXXXXXXXX
+    if len(digits) == 10 and digits.startswith("0"):
+        return "+27" + digits[1:]
+
+    if strict:
+        raise ValueError("South African numbers must be exactly 10 digits starting with 0.")
+
+    return ""
     
 def phone_variants(phone: str):
     """
@@ -3224,15 +3233,10 @@ def register():
     guardian_phone_type = request.form.get("guardian_phone_type", "SA")
 
     try:
-        phone = normalize_phone(
-            request.form.get("phone",""),
-            phone_type
-        )
+        phone = normalize_phone(request.form.get("phone",""), phone_type, strict=True)
 
-        guardian = normalize_phone(
-            request.form.get("guardian",""),
-            guardian_phone_type
-        )
+        guardian = normalize_phone(request.form.get("guardian",""),guardian_phone_type)
+        
     except ValueError as e:
         return page("Error", card_msg(str(e)))
     
@@ -3707,7 +3711,11 @@ def student_login_post():
     raw_phone = request.form.get('phone','').strip()
     pin = request.form.get('pin','').strip()
 
-    normalized = normalize_phone(raw_phone)
+    try:
+        normalized = normalize_phone(raw_phone)
+    except ValueError:
+        flash("Invalid phone number format.")
+        return redirect(url_for("student_login"))
     variants = phone_variants(normalized)
 
     if not variants:
@@ -5059,7 +5067,11 @@ def tutor_login_post():
     pin = request.form.get('pin', '').strip()
 
     # Normalize first (remove spaces, symbols)
-    normalized = normalize_phone(raw_phone)
+    try:
+        normalized = normalize_phone(raw_phone)
+    except ValueError:
+        flash("Invalid phone number format.")
+        return redirect(url_for("tutor_login"))
 
     # Generate all possible variants
     variants = phone_variants(normalized)
