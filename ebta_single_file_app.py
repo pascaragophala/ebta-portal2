@@ -5065,7 +5065,7 @@ def tutor_login_post():
 
     # Normalize first (remove spaces, symbols)
     if raw_phone.startswith("+"):
-    normalized = normalize_phone(raw_phone, "INT")
+        normalized = normalize_phone(raw_phone, "INT")
     else:
         normalized = normalize_phone(raw_phone, "SA")
 
