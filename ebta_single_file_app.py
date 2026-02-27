@@ -388,7 +388,7 @@ def init_db():
             ("Natural Sciences","G8"), ("Natural Sciences","G9"),
             
             #English
-            ("English FAL","G8"), ("English FAL","G9"),("English FAL","G10"),("English FAL","G11"),("English FAL","G12"),
+            ("English","G8"), ("English","G9"),("English","G10"),("English","G11"),("English","G12"),
         ]
 
         cur.executemany("INSERT OR IGNORE INTO subjects(name,grade) VALUES(?,?)", seed)
@@ -432,7 +432,7 @@ def init_db():
             ("Natural Sciences","G8"), ("Natural Sciences","G9"),
             
             #English
-            ("English FAL","G8"), ("English FAL","G9"),("English FAL","G10"),("English FAL","G11"),("English FAL","G12"),
+            ("English","G8"), ("English","G9"),("English","G10"),("English","G11"),("English","G12"),
         ]
 
         cur.executemany("INSERT OR IGNORE INTO subjects(name,grade) VALUES(?,?)", required_subjects)
@@ -507,11 +507,7 @@ def init_db():
     # (Currently disabled – kept for future use)
 
     subjects_to_remove = [
-        ("English", "G8"),
-        ("English", "G9"),
-        ("English", "G10"),
-        ("English", "G11"),
-        ("English", "G12"),
+        ("Geography", "G11"),
         ("Economics", "G12"),
         ("Business Studies", "G10"),
     ]
@@ -2331,7 +2327,7 @@ def home():
         ("Natural Sciences","G8"), ("Natural Sciences","G9"),
         
         #English
-        ("English FAL","G8"), ("English FAL","G9"),("English FAL","G10"),("English FAL","G11"),("English FAL","G12"),
+        ("English","G8"), ("English","G9"),("English","G10"),("English","G11"),("English","G12"),
     ]
 
     try:
@@ -2798,7 +2794,7 @@ function showPopup(message, type='info', timeout=4000){
 
 
         function digitsOnly(str){
-            return (str ||'').replace(/\D/g,'');
+            return (str ||'').replace(/\\D/g,'');
         }
 
         // Student validation
