@@ -658,25 +658,22 @@ def normalize_phone(phone: str, phone_type: str = "SA", strict: bool = False) ->
 
     # INTERNATIONAL
     if phone_type == "INT":
-        if not phone.startswith("+"):
+        if phone.startswith("+"):
             return "+" + digits
-        return phone
+        return "+" + digits
 
     # SOUTH AFRICA
-    # If already +27 format
     if phone.startswith("+27") and len(digits) == 11:
         return "+27" + digits[-9:]
 
-    # If entered as 27XXXXXXXXX
     if digits.startswith("27") and len(digits) == 11:
         return "+27" + digits[2:]
 
-    # If entered as 0XXXXXXXXX
     if len(digits) == 10 and digits.startswith("0"):
         return "+27" + digits[1:]
 
     if strict:
-        raise ValueError("South African numbers must be exactly 10 digits starting with 0.")
+        raise ValueError("South African numbers must be 10 digits starting with 0.")
 
     return ""
     
@@ -3711,15 +3708,15 @@ def student_login_post():
     raw_phone = request.form.get('phone','').strip()
     pin = request.form.get('pin','').strip()
 
-    try:
-        normalized = normalize_phone(raw_phone)
-    except ValueError:
-        flash("Invalid phone number format.")
-        return redirect(url_for("student_login"))
+    if raw_phone.startswith("+"):
+        normalized = normalize_phone(raw_phone, "INT")
+    else:
+        normalized = normalize_phone(raw_phone, "SA")
+
     variants = phone_variants(normalized)
 
     if not variants:
-        return page("Login failed", card_msg("Phone number required."))
+        return page("Login failed", card_msg("Incorrect Phone Number."))
 
     conn = get_db()
     cur = conn.cursor()
@@ -5067,11 +5064,10 @@ def tutor_login_post():
     pin = request.form.get('pin', '').strip()
 
     # Normalize first (remove spaces, symbols)
-    try:
-        normalized = normalize_phone(raw_phone)
-    except ValueError:
-        flash("Invalid phone number format.")
-        return redirect(url_for("tutor_login"))
+    if raw_phone.startswith("+"):
+    normalized = normalize_phone(raw_phone, "INT")
+    else:
+        normalized = normalize_phone(raw_phone, "SA")
 
     # Generate all possible variants
     variants = phone_variants(normalized)
