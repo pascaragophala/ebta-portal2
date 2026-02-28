@@ -7026,8 +7026,6 @@ def admin_students():
     q = request.args.get("q", "").strip()
     selected_month = request.args.get("month", "").strip()
     q_safe = escape(q)
-    if q:
-        page_num = 1
 
     r = require_admin()
     if r:
@@ -7073,6 +7071,9 @@ def admin_students():
 
     total = cur.fetchone()['c']
     total_pages = (total + limit - 1) // limit
+
+    params = []
+    where_clauses = []
 
     if selected_month:
         where_clauses.append("e.month = ?")
