@@ -257,6 +257,8 @@ def init_db():
     ensure_column(conn, "materials", "admin_unlocked", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "students", "phone_type", "TEXT DEFAULT 'SA'")
     ensure_column(conn, "students", "guardian_phone_type", "TEXT DEFAULT 'SA'")
+    ensure_column(conn, "sessions", "meeting_id", "TEXT")
+    ensure_column(conn, "sessions", "meeting_passcode", "TEXT")
 
 
 
@@ -4111,7 +4113,7 @@ def student_home():
     # Sessions + Meet link for enrolled subjects
     sessions_html="<div class='empty'>No sessions yet.</div>"
     if has_active_enrollment and active_sub_ids:
-        q=f"""SELECT s.subject_id, sub.name AS subject_name, sub.grade, s.day_of_week, s.start_time, s.end_time, s.meet_link
+        q=f"""SELECT s.subject_id, sub.name AS subject_name, sub.grade, s.day_of_week, s.start_time, s.end_time, s.meet_link,s.meeting_id,s.meeting_passcode
             FROM sessions s JOIN subjects sub ON sub.id=s.subject_id
             WHERE s.active=1 AND s.subject_id IN ({','.join('?'*len(active_sub_ids))})
             ORDER BY s.day_of_week, s.start_time"""
@@ -4153,7 +4155,15 @@ def student_home():
 
                             <div class="mini muted">
                                 {DOW[r['day_of_week']]} • {r['start_time']} - {r['end_time']}
+
                             </div>
+                            
+                            {f"""
+                            <div style="margin-top:6px;font-size:13px">
+                                <div><b>Meeting ID:</b> {r['meeting_id']}</div>
+                                <div><b>Passcode:</b> {r['meeting_passcode']}</div>
+                            </div>
+                            """ if r['meeting_id'] or r['meeting_passcode'] else ""}
 
                         </div>
 
@@ -5301,9 +5311,24 @@ def tutor_home():
 
 
     # Sessions for this tutor
-    cur.execute("""SELECT se.id, se.subject_id, s.name AS subject_name, s.grade, se.day_of_week, se.start_time, se.end_time, se.meet_link
-                FROM sessions se JOIN subjects s ON s.id=se.subject_id
-                WHERE se.tutor_id=? AND se.active=1 ORDER BY se.day_of_week,se.start_time""",(tid,))
+    cur.execute("""
+        SELECT 
+            se.id,
+            se.subject_id,
+            s.name AS subject_name,
+            s.grade,
+            se.day_of_week,
+            se.start_time,
+            se.end_time,
+            se.meet_link,
+            se.meeting_id,
+            se.meeting_passcode
+        FROM sessions se
+        JOIN subjects s ON s.id = se.subject_id
+        WHERE se.tutor_id = ?
+          AND se.active = 1
+        ORDER BY se.day_of_week, se.start_time
+    """, (tid,))
     sess=cur.fetchall()
     session_cards = []
 
@@ -5348,6 +5373,13 @@ def tutor_home():
                     <div class="mini muted">
                         {DOW[r['day_of_week']]} • {r['start_time']} - {r['end_time']}
                     </div>
+                    
+                    {f"""
+                    <div style="margin-top:6px;font-size:13px">
+                        <div><b>Meeting ID:</b> {r['meeting_id']}</div>
+                        <div><b>Passcode:</b> {r['meeting_passcode']}</div>
+                    </div>
+                    """ if r['meeting_id'] or r['meeting_passcode'] else ""}
 
                 </div>
 
@@ -8621,7 +8653,6 @@ def admin_sessions():
     FROM sessions se
     JOIN subjects s ON s.id = se.subject_id
     JOIN tutors t ON t.id = se.tutor_id
-
     ORDER BY
         CAST(REPLACE(s.grade, 'G', '') AS INTEGER) ASC,
         s.name ASC,
@@ -8693,6 +8724,10 @@ def admin_sessions():
                 </form>
 
                 ·
+                <a class="links"
+                   href="{url_for('admin_session_edit', sid=r['id'])}">
+                   Edit
+                </a>·
 
                 <form method='post'
                       action='{url_for('admin_session_delete', sid=r['id'])}'
@@ -8702,6 +8737,8 @@ def admin_sessions():
                     <button class='btn danger mini'>Delete</button>
 
                 </form>
+                
+                
 
             </td>
 
@@ -8748,6 +8785,12 @@ def admin_sessions():
 
                 <input name='meet'
                        placeholder='Meet link (optional)' />
+                
+                <input name='meeting_id'
+                       placeholder='Meeting ID (optional)' />
+
+                <input name='meeting_passcode'
+                       placeholder='Meeting Passcode (optional)' />
 
                 <button class='btn'>Add</button>
 
@@ -8828,6 +8871,8 @@ def admin_sessions_post():
     start = request.form.get('start', '')
     end = request.form.get('end', '')
     meet = request.form.get('meet', '') or None
+    meeting_id = request.form.get('meeting_id') or None
+    meeting_passcode = request.form.get('meeting_passcode') or None
 
     conn = get_db()
     cur = conn.cursor()
@@ -8866,14 +8911,122 @@ def admin_sessions_post():
         tutor_id = cur.lastrowid
 
     cur.execute("""
-    INSERT INTO sessions(subject_id,tutor_id,day_of_week,start_time,end_time,meet_link)
-    VALUES(?,?,?,?,?,?)
-    """, (subject_id, tutor_id, dow, start, end, meet))
+    INSERT INTO sessions(
+        subject_id,
+        tutor_id,
+        day_of_week,
+        start_time,
+        end_time,
+        meet_link,
+        meeting_id,
+        meeting_passcode
+    )
+    VALUES(?,?,?,?,?,?,?,?)
+    """, (
+        subject_id,
+        tutor_id,
+        dow,
+        start,
+        end,
+        meet,
+        meeting_id,
+        meeting_passcode
+    ))
     # Ensure tutor-subject mapping exists for uploads and messaging
     cur.execute("INSERT OR IGNORE INTO tutor_subjects(tutor_id,subject_id) VALUES(?,?)",(tutor_id,subject_id))
     conn.commit()
     conn.close()
     return redirect(url_for('admin_sessions'))
+    
+    
+
+@app.get('/admin/sessions/edit/<int:sid>')
+def admin_session_edit(sid):
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM sessions WHERE id=?", (sid,))
+    session_row = cur.fetchone()
+    conn.close()
+
+    if not session_row:
+        return redirect(url_for('admin_sessions'))
+
+    body = f"""
+    {admin_nav()}
+    <section class='card'>
+        <h1>Edit Session</h1>
+
+        <form method="post"
+              action="{url_for('admin_session_update', sid=sid)}"
+              class="grid"
+              style="gap:10px">
+
+            <input name="start_time"
+                   value="{session_row['start_time']}"
+                   required>
+
+            <input name="end_time"
+                   value="{session_row['end_time']}"
+                   required>
+
+            <input name="meet_link"
+                   value="{session_row['meet_link'] or ''}"
+                   placeholder="Meet link">
+
+            <input name="meeting_id"
+                   value="{session_row['meeting_id'] or ''}"
+                   placeholder="Meeting ID">
+
+            <input name="meeting_passcode"
+                   value="{session_row['meeting_passcode'] or ''}"
+                   placeholder="Meeting Passcode">
+
+            <button class="btn success">
+                Update
+            </button>
+
+        </form>
+    </section>
+    """
+
+    return page("Edit Session", body)
+    
+@app.post('/admin/sessions/update/<int:sid>')
+def admin_session_update(sid):
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE sessions
+        SET start_time=?,
+            end_time=?,
+            meet_link=?,
+            meeting_id=?,
+            meeting_passcode=?
+        WHERE id=?
+    """, (
+        request.form.get("start_time"),
+        request.form.get("end_time"),
+        request.form.get("meet_link"),
+        request.form.get("meeting_id"),
+        request.form.get("meeting_passcode"),
+        sid
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for('admin_sessions'))
+
 
 # --- Session QR (uses PNG endpoint) ---
 
