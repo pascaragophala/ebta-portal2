@@ -1655,8 +1655,36 @@ background:#fff;
     color: #059669;
 }
 
+/* Followups table improvements */
+.followups-table th,
+.followups-table td{
+    min-width:120px;
+    vertical-align:middle;
+}
 
+.followups-table input,
+.followups-table select{
+    min-width:120px;
+}
 
+.followups-table textarea{
+    min-width:180px;
+}
+
+.followups-table td.notes-cell{
+    min-width:220px;
+}
+
+.follow-open{
+    background:#fff5f5 !important;
+}
+
+.follow-paid{
+    background:#f0fff4 !important;
+}
+.overdue{
+    border-left:6px solid #dc2626 !important;
+}
 </style>
 """
 
@@ -10166,7 +10194,8 @@ def admin_sms_dashboard():
 @app.get('/admin/followups')
 def admin_followups():
     r = require_admin()
-    if r: return r
+    if r:
+        return r
 
     conn = get_db()
     cur = conn.cursor()
@@ -10187,29 +10216,97 @@ def admin_followups():
         cur.execute("SELECT * FROM followups ORDER BY created_at DESC")
 
     rows = cur.fetchall()
+
+    # get subjects for dropdown
+    cur.execute("SELECT DISTINCT name FROM subjects ORDER BY name")
+    subjects = [row["name"] for row in cur.fetchall()]
     conn.close()
+
+    subject_options = "".join(
+        f"<option value='{escape(s)}'>{escape(s)}</option>"
+        for s in subjects
+    )
 
     trs = []
 
-    for r in rows:
+    for row in rows:
+
+        # -------- Row Color --------
+        row_class = ""
+        if row["followup_status"] == "OPEN":
+            row_class = "follow-open"
+        elif row["followup_status"] == "PAID":
+            row_class = "follow-paid"
+
+        # -------- Overdue --------
+        overdue_class = ""
+        if row["payment_date"] and row["followup_status"] == "OPEN":
+            try:
+                pay_date = datetime.datetime.strptime(
+                    row["payment_date"], "%Y-%m-%d"
+                ).date()
+                if pay_date < datetime.date.today():
+                    overdue_class = "overdue"
+            except:
+                pass
+
+        # -------- WhatsApp --------
+        wa_link = ""
+        if row["phone"]:
+            phone = normalize_phone(row["phone"])
+            if phone:
+                wa_link = f"""
+                <a class="btn mini success"
+                   target="_blank"
+                   href="https://wa.me/{phone.replace('+','')}">
+                   WA
+                </a>
+                """
+
+        # -------- Build row --------
         trs.append(f"""
-        <tr>
-        <form method="post" action="{url_for('admin_followup_update', fid=r['id'])}">
-            <td><input name="full_name" value="{escape(r['full_name'])}"></td>
-            <td><input name="phone" value="{escape(r['phone'] or '')}"></td>
-            <td><input name="grade" value="{escape(r['grade'] or '')}"></td>
-            <td><input name="subjects" value="{escape(r['subjects'] or '')}"></td>
+        <tr class="{row_class} {overdue_class}">
+        <form method="post" action="{url_for('admin_followup_update', fid=row['id'])}">
+            <td><input name="full_name" value="{escape(row['full_name'])}"></td>
+
             <td>
-                <select name="followup_status">
-                    <option {"selected" if r['followup_status']=="OPEN" else ""}>OPEN</option>
-                    <option {"selected" if r['followup_status']=="PAID" else ""}>PAID</option>
-                    <option {"selected" if r['followup_status']=="NO RESPONSE" else ""}>NO RESPONSE</option>
-                    <option {"selected" if r['followup_status']=="DECLINED" else ""}>DECLINED</option>
+                <input name="phone" value="{escape(row['phone'] or '')}">
+                {wa_link}
+            </td>
+
+            <td>
+                <select name="grade">
+                    <option value="">Select</option>
+                    {''.join(
+                        f"<option value='{g}' {'selected' if row['grade']==g else ''}>{grade_label(g)}</option>"
+                        for g in ["G8","G9","G10","G11","G12","G13"]
+                    )}
                 </select>
             </td>
-            <td><input type="date" name="payment_date" value="{r['payment_date'] or ''}"></td>
-            <td><input type="date" name="date_communicated" value="{r['date_communicated'] or ''}"></td>
-            <td><input name="notes" value="{escape(r['notes'] or '')}"></td>
+
+            <td>
+                <select name="subjects">
+                    <option value="">Select</option>
+                    {''.join(
+                        f"<option value='{escape(s)}' {'selected' if row['subjects']==s else ''}>{escape(s)}</option>"
+                        for s in subjects
+                    )}
+                </select>
+            </td>
+
+            <td>
+                <select name="followup_status">
+                    <option {'selected' if row['followup_status']=="OPEN" else ""}>OPEN</option>
+                    <option {'selected' if row['followup_status']=="PAID" else ""}>PAID</option>
+                    <option {'selected' if row['followup_status']=="NO RESPONSE" else ""}>NO RESPONSE</option>
+                    <option {'selected' if row['followup_status']=="DECLINED" else ""}>DECLINED</option>
+                </select>
+            </td>
+
+            <td><input type="date" name="payment_date" value="{row['payment_date'] or ''}"></td>
+            <td><input type="date" name="date_communicated" value="{row['date_communicated'] or ''}"></td>
+            <td><input name="notes" value="{escape(row['notes'] or '')}"></td>
+
             <td><button class="btn mini success">Save</button></td>
         </form>
         </tr>
@@ -10223,14 +10320,16 @@ def admin_followups():
 
         <div class='toolbar'>
             <form method="get">
-                <input type="text" name="q" value="{q}" placeholder="Search">
+                <input type="text" name="q" value="{escape(q)}" placeholder="Search">
                 <button class="btn mini">Search</button>
             </form>
+
             <a class="btn success mini" href="{url_for('admin_followup_add')}">Add New</a>
+            <a class="btn secondary mini" href="{url_for('export_followups')}">Export Excel</a>
         </div>
 
         <div class="scroll-x">
-        <table>
+        <table class="followups-table">
             <thead>
                 <tr>
                     <th>Name</th>
@@ -10238,7 +10337,7 @@ def admin_followups():
                     <th>Grade</th>
                     <th>Subjects</th>
                     <th>Status</th>
-                    <th>Payment Date</th>
+                    <th>Payment</th>
                     <th>Communicated</th>
                     <th>Notes</th>
                     <th>Save</th>
@@ -10257,7 +10356,19 @@ def admin_followups():
 @app.get('/admin/followups/add')
 def admin_followup_add():
     r = require_admin()
-    if r: return r
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT name FROM subjects ORDER BY name")
+    subjects = [row["name"] for row in cur.fetchall()]
+    conn.close()
+
+    subject_options = "".join(
+        f"<option value='{escape(s)}'>{escape(s)}</option>"
+        for s in subjects
+    )
 
     body = f"""
     {admin_nav()}
@@ -10267,8 +10378,22 @@ def admin_followup_add():
         <form method="post" action="{url_for('admin_followup_create')}" class="grid" style="gap:10px">
             <input name="full_name" placeholder="Full name" required>
             <input name="phone" placeholder="Phone">
-            <input name="grade" placeholder="Grade">
-            <input name="subjects" placeholder="Subjects">
+
+            <select name="grade">
+                <option value="">Select</option>
+                <option value="G8">Grade 8</option>
+                <option value="G9">Grade 9</option>
+                <option value="G10">Grade 10</option>
+                <option value="G11">Grade 11</option>
+                <option value="G12">Grade 12</option>
+                <option value="G13">Grade 13</option>
+            </select>
+
+            <select name="subjects">
+                <option value="">Select</option>
+                {subject_options}
+            </select>
+
             <input type="date" name="payment_date">
             <input type="date" name="date_communicated">
             <textarea name="notes" placeholder="Notes"></textarea>
@@ -10345,7 +10470,48 @@ def admin_followup_update(fid):
     conn.close()
 
     return redirect(url_for('admin_followups'))
+    
 
+@app.get("/admin/followups/export")
+def export_followups():
+    r = require_admin()
+    if r: return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM followups ORDER BY created_at DESC")
+    rows = cur.fetchall()
+    conn.close()
+
+    import csv
+    from io import StringIO
+
+    si = StringIO()
+    writer = csv.writer(si)
+
+    writer.writerow([
+        "Name","Phone","Grade","Subjects",
+        "Status","Payment Date",
+        "Communicated","Notes"
+    ])
+
+    for row in rows:
+        writer.writerow([
+            row["full_name"],
+            row["phone"],
+            row["grade"],
+            row["subjects"],
+            row["followup_status"],
+            row["payment_date"],
+            row["date_communicated"],
+            row["notes"]
+        ])
+
+    output = make_response(si.getvalue())
+    output.headers["Content-Disposition"] = "attachment; filename=followups.csv"
+    output.headers["Content-type"] = "text/csv"
+    return output
 
 # --- Admin: Analytics dashboard ---
 
@@ -10686,3 +10852,7 @@ def payfast_ipn():
 
 
 # ===================== MAIN ==============
+if __name__ == '__main__':
+    init_db()
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
