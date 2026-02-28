@@ -338,7 +338,24 @@ def init_db():
     );
     """)
     
-    
+    # ================= FOLLOW UPS =================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS followups(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name TEXT NOT NULL,
+        phone TEXT,
+        grade TEXT,
+        subjects TEXT,
+        followup_status TEXT DEFAULT 'OPEN',
+        payment_date TEXT,
+        date_communicated TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    );
+    """)
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_followups_name ON followups(full_name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_followups_status ON followups(followup_status)")
     
 
     # Defaults & seed
@@ -6641,7 +6658,7 @@ def admin_nav():
         <a class="btn secondary" href="{url_for('admin_direct_messages')}">Direct Msgs</a>
         <a class="btn secondary" href="{url_for('admin_sms_dashboard')}">SMS Dashboard</a>
         <a class="btn secondary" href="{url_for('admin_process_sms')}">Processed SMS</a>
-
+        <a class="btn secondary" href="{url_for('admin_followups')}">Follow-Ups</a>
     </nav>
     """
 
@@ -10145,6 +10162,189 @@ def admin_sms_dashboard():
     """
 
     return page("SMS Dashboard", body)
+    
+@app.get('/admin/followups')
+def admin_followups():
+    r = require_admin()
+    if r: return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    q = request.args.get("q", "").strip()
+
+    if q:
+        search = f"%{q}%"
+        cur.execute("""
+            SELECT * FROM followups
+            WHERE full_name LIKE ?
+               OR phone LIKE ?
+               OR subjects LIKE ?
+               OR followup_status LIKE ?
+            ORDER BY created_at DESC
+        """, (search, search, search, search))
+    else:
+        cur.execute("SELECT * FROM followups ORDER BY created_at DESC")
+
+    rows = cur.fetchall()
+    conn.close()
+
+    trs = []
+
+    for r in rows:
+        trs.append(f"""
+        <tr>
+        <form method="post" action="{url_for('admin_followup_update', fid=r['id'])}">
+            <td><input name="full_name" value="{escape(r['full_name'])}"></td>
+            <td><input name="phone" value="{escape(r['phone'] or '')}"></td>
+            <td><input name="grade" value="{escape(r['grade'] or '')}"></td>
+            <td><input name="subjects" value="{escape(r['subjects'] or '')}"></td>
+            <td>
+                <select name="followup_status">
+                    <option {"selected" if r['followup_status']=="OPEN" else ""}>OPEN</option>
+                    <option {"selected" if r['followup_status']=="PAID" else ""}>PAID</option>
+                    <option {"selected" if r['followup_status']=="NO RESPONSE" else ""}>NO RESPONSE</option>
+                    <option {"selected" if r['followup_status']=="DECLINED" else ""}>DECLINED</option>
+                </select>
+            </td>
+            <td><input type="date" name="payment_date" value="{r['payment_date'] or ''}"></td>
+            <td><input type="date" name="date_communicated" value="{r['date_communicated'] or ''}"></td>
+            <td><input name="notes" value="{escape(r['notes'] or '')}"></td>
+            <td><button class="btn mini success">Save</button></td>
+        </form>
+        </tr>
+        """)
+
+    body = f"""
+    {admin_nav()}
+
+    <section class='card'>
+        <h1>Follow-Up Tracker</h1>
+
+        <div class='toolbar'>
+            <form method="get">
+                <input type="text" name="q" value="{q}" placeholder="Search">
+                <button class="btn mini">Search</button>
+            </form>
+            <a class="btn success mini" href="{url_for('admin_followup_add')}">Add New</a>
+        </div>
+
+        <div class="scroll-x">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Grade</th>
+                    <th>Subjects</th>
+                    <th>Status</th>
+                    <th>Payment Date</th>
+                    <th>Communicated</th>
+                    <th>Notes</th>
+                    <th>Save</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(trs) or "<tr><td colspan='9'>No followups yet.</td></tr>"}
+            </tbody>
+        </table>
+        </div>
+    </section>
+    """
+
+    return page("Followups", body)
+    
+@app.get('/admin/followups/add')
+def admin_followup_add():
+    r = require_admin()
+    if r: return r
+
+    body = f"""
+    {admin_nav()}
+    <section class='card'>
+        <h1>Add Follow-Up</h1>
+
+        <form method="post" action="{url_for('admin_followup_create')}" class="grid" style="gap:10px">
+            <input name="full_name" placeholder="Full name" required>
+            <input name="phone" placeholder="Phone">
+            <input name="grade" placeholder="Grade">
+            <input name="subjects" placeholder="Subjects">
+            <input type="date" name="payment_date">
+            <input type="date" name="date_communicated">
+            <textarea name="notes" placeholder="Notes"></textarea>
+
+            <button class="btn success">Save</button>
+        </form>
+    </section>
+    """
+    return page("Add Followup", body)
+    
+@app.post('/admin/followups/create')
+def admin_followup_create():
+    r = require_admin()
+    if r: return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO followups(
+            full_name, phone, grade, subjects,
+            payment_date, date_communicated,
+            notes, created_at
+        )
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (
+        request.form.get("full_name"),
+        request.form.get("phone"),
+        request.form.get("grade"),
+        request.form.get("subjects"),
+        request.form.get("payment_date"),
+        request.form.get("date_communicated"),
+        request.form.get("notes"),
+        now_utc_iso()
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for('admin_followups'))
+    
+@app.post('/admin/followups/update/<int:fid>')
+def admin_followup_update(fid):
+    r = require_admin()
+    if r: return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE followups SET
+            full_name=?,
+            phone=?,
+            grade=?,
+            subjects=?,
+            followup_status=?,
+            payment_date=?,
+            date_communicated=?,
+            notes=?
+        WHERE id=?
+    """, (
+        request.form.get("full_name"),
+        request.form.get("phone"),
+        request.form.get("grade"),
+        request.form.get("subjects"),
+        request.form.get("followup_status"),
+        request.form.get("payment_date"),
+        request.form.get("date_communicated"),
+        request.form.get("notes"),
+        fid
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for('admin_followups'))
 
 
 # --- Admin: Analytics dashboard ---
