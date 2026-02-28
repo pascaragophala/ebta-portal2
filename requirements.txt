@@ -3,3 +3,4 @@ qrcode[pil]
 gunicorn
 psycopg[binary]
 twilio
+openpyxl
