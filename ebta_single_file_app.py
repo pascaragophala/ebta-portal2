@@ -7397,6 +7397,22 @@ def admin_students():
             </form>
 
             {"<a class='btn success mini' href='"+url_for('admin_students_export')+"?month="+selected_month+"'>Export Excel</a>" if selected_month else ""}
+            <div style="margin-top:10px">
+                <form method="get" action="{url_for('admin_students_compare_export')}"
+                      style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+
+                    <label>Previous:</label>
+                    <input type="month" name="prev" required>
+
+                    <label>Current:</label>
+                    <input type="month" name="curr" required>
+
+                    <button class="btn success mini">
+                        Compare & Export
+                    </button>
+
+                </form>
+            </div>
         </div>
 
         {nav}
@@ -7509,6 +7525,170 @@ def admin_students_export():
     return send_from_directory("/tmp", f"students_{month}.xlsx", as_attachment=True)
 
 
+@app.get('/admin/students/compare')
+def admin_students_compare_export():
+    r = require_admin()
+    if r:
+        return r
+
+    prev_month = request.args.get("prev")
+    curr_month = request.args.get("curr")
+
+    if not prev_month or not curr_month:
+        return redirect(url_for('admin_students'))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # ACTIVE students only
+    cur.execute("""
+        SELECT DISTINCT s.id, s.full_name, s.phone_whatsapp, s.grade
+        FROM students s
+        JOIN enrollments e ON e.student_id = s.id
+        WHERE e.month = ?
+          AND e.status = 'ACTIVE'
+    """, (prev_month,))
+    prev_rows = cur.fetchall()
+
+    cur.execute("""
+        SELECT DISTINCT s.id, s.full_name, s.phone_whatsapp, s.grade
+        FROM students s
+        JOIN enrollments e ON e.student_id = s.id
+        WHERE e.month = ?
+          AND e.status = 'ACTIVE'
+    """, (curr_month,))
+    curr_rows = cur.fetchall()
+
+    conn.close()
+
+    prev_dict = {r["id"]: r for r in prev_rows}
+    curr_dict = {r["id"]: r for r in curr_rows}
+
+    all_ids = set(prev_dict.keys()) | set(curr_dict.keys())
+
+    continued = []
+    lost = []
+    new = []
+
+    for sid in all_ids:
+        in_prev = sid in prev_dict
+        in_curr = sid in curr_dict
+        base = prev_dict.get(sid) or curr_dict.get(sid)
+
+        row = [
+            base["full_name"],
+            base["phone_whatsapp"],
+            grade_label(base["grade"]),
+            "YES" if in_prev else "NO",
+            "YES" if in_curr else "NO",
+        ]
+
+        if in_prev and in_curr:
+            continued.append(row)
+        elif in_prev and not in_curr:
+            lost.append(row)
+        elif not in_prev and in_curr:
+            new.append(row)
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    wb = Workbook()
+
+    # ---------- SUMMARY SHEET ----------
+    ws = wb.active
+    ws.title = "Summary"
+
+    headers = [
+        "Full Name",
+        "Phone",
+        "Grade",
+        f"Enrolled {prev_month}",
+        f"Enrolled {curr_month}",
+        "Status"
+    ]
+
+    ws.append([f"Comparison: {prev_month} vs {curr_month}"])
+    ws.append([])
+
+    total_prev = len(prev_dict)
+    total_curr = len(curr_dict)
+    total_cont = len(continued)
+
+    retention_pct = round((total_cont / total_prev) * 100, 2) if total_prev else 0
+
+    ws.append(["Previous Month Students", total_prev])
+    ws.append(["Current Month Students", total_curr])
+    ws.append(["Continued Students", total_cont])
+    ws.append(["Lost Students", len(lost)])
+    ws.append(["New Students", len(new)])
+    ws.append(["Retention %", f"{retention_pct}%"])
+    ws.append([])
+
+    ws.append(headers)
+
+    for col in ws[ws.max_row]:
+        col.font = Font(bold=True)
+        col.alignment = Alignment(horizontal="center")
+
+    green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    red = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    yellow = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+
+    # Add all students to summary
+    for row in continued:
+        ws.append(row + ["CONTINUED"])
+        for c in ws[ws.max_row]:
+            c.fill = green
+
+    for row in lost:
+        ws.append(row + ["LOST"])
+        for c in ws[ws.max_row]:
+            c.fill = red
+
+    for row in new:
+        ws.append(row + ["NEW"])
+        for c in ws[ws.max_row]:
+            c.fill = yellow
+
+    # Auto column width
+    for col in ws.columns:
+        max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = max_length + 4
+
+    # ---------- CONTINUED SHEET ----------
+    ws_cont = wb.create_sheet("Continued")
+    ws_cont.append(headers[:-1])
+    for col in ws_cont[1]:
+        col.font = Font(bold=True)
+
+    for row in continued:
+        ws_cont.append(row)
+
+    # ---------- LOST SHEET ----------
+    ws_lost = wb.create_sheet("Lost")
+    ws_lost.append(headers[:-1])
+    for col in ws_lost[1]:
+        col.font = Font(bold=True)
+
+    for row in lost:
+        ws_lost.append(row)
+
+    # ---------- NEW SHEET ----------
+    ws_new = wb.create_sheet("New")
+    ws_new.append(headers[:-1])
+    for col in ws_new[1]:
+        col.font = Font(bold=True)
+
+    for row in new:
+        ws_new.append(row)
+
+    file_name = f"compare_{prev_month}_vs_{curr_month}.xlsx"
+    file_path = f"/tmp/{file_name}"
+    wb.save(file_path)
+
+    return send_from_directory("/tmp", file_name, as_attachment=True)
+    
 @app.get('/admin/students/<int:sid>/edit')
 def admin_student_edit(sid):
 
