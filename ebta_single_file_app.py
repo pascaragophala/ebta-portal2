@@ -7058,39 +7058,45 @@ def admin_students():
     if q:
         cur.execute("""
             SELECT
-                id,
-                full_name,
-                phone_whatsapp,
-                guardian_phone,
-                email,
-                grade,
-                province,
-                school,
-                pin
-            FROM students
+                s.id,
+                s.full_name,
+                s.phone_whatsapp,
+                s.guardian_phone,
+                s.email,
+                s.grade,
+                s.province,
+                s.school,
+                s.pin,
+                strftime('%Y-%m-%d', datetime(MIN(e.created_at), '+2 hours')) AS first_enrolled
+            FROM students s
+            LEFT JOIN enrollments e ON e.student_id = s.id
             WHERE
-                full_name LIKE ?
-                OR phone_whatsapp LIKE ?
-                OR guardian_phone LIKE ?
-                OR email LIKE ?
-                OR school LIKE ?
-            ORDER BY created_at DESC
+                s.full_name LIKE ?
+                OR s.phone_whatsapp LIKE ?
+                OR s.guardian_phone LIKE ?
+                OR s.email LIKE ?
+                OR s.school LIKE ?
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
             LIMIT ? OFFSET ?
         """, (f"%{q}%",)*5 + (limit, offset))
     else:
         cur.execute("""
             SELECT
-                id,
-                full_name,
-                phone_whatsapp,
-                guardian_phone,
-                email,
-                grade,
-                province,
-                school,
-                pin
-            FROM students
-            ORDER BY created_at DESC
+                s.id,
+                s.full_name,
+                s.phone_whatsapp,
+                s.guardian_phone,
+                s.email,
+                s.grade,
+                s.province,
+                s.school,
+                s.pin,
+                strftime('%Y-%m-%d', datetime(MIN(e.created_at), '+2 hours')) AS first_enrolled
+            FROM students s
+            LEFT JOIN enrollments e ON e.student_id = s.id
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
             LIMIT ? OFFSET ?
         """, (limit, offset))
 
@@ -7130,6 +7136,7 @@ def admin_students():
             <td>{nz(s['province'])}</td>
             <td>{nz(s['school'])}</td>
             <td>{nz(s['email'])}</td>
+            <td>{s['first_enrolled'] or 'N/A'}</td>
             <td>{pin}</td>
             <td style="white-space:nowrap">
 
@@ -7236,12 +7243,13 @@ def admin_students():
                         <th>Province</th>
                         <th>School</th>
                         <th>Email</th>
+                        <th>First Enrolled</th>
                         <th>PIN</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {''.join(trs) or "<tr><td colspan='9'>No students.</td></tr>"}
+                    {''.join(trs) or "<tr><td colspan='10'>No students.</td></tr>"}
                 </tbody>
             </table>
         </div>
