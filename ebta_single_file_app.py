@@ -6704,6 +6704,8 @@ def admin_enrollments():
     year = month.split('-')[0]
 
     page_num = int(request.args.get("page", 1))
+    q = request.args.get("q", "").strip()
+    q_safe = escape(q)
     limit = 30
     offset = (page_num - 1) * limit
 
@@ -6711,12 +6713,46 @@ def admin_enrollments():
     cur = conn.cursor()
 
     # Total count
-    cur.execute("SELECT COUNT(*) AS c FROM enrollments WHERE month=?", (month,))
+    # -----------------------
+    # Build filters
+    # -----------------------
+    params = [month]
+    where_sql = "WHERE e.month = ?"
+
+    if q:
+        where_sql += """
+        AND (
+            st.full_name LIKE ?
+            OR st.phone_whatsapp LIKE ?
+            OR st.grade LIKE ?
+            OR sub.name LIKE ?
+            OR e.status LIKE ?
+        )
+        """
+        search_term = f"%{q}%"
+        params.extend([search_term] * 5)
+
+    # -----------------------
+    # COUNT query
+    # -----------------------
+    cur.execute(f"""
+        SELECT COUNT(*) AS c
+        FROM enrollments e
+        JOIN students st ON st.id = e.student_id
+        JOIN subjects sub ON sub.id = e.subject_id
+        {where_sql}
+    """, params)
+
     total = cur.fetchone()['c']
     total_pages = (total + limit - 1) // limit
 
-    # Main query
-    cur.execute("""
+    # -----------------------
+    # MAIN query
+    # -----------------------
+    data_params = list(params)
+    data_params.extend([limit, offset])
+
+    cur.execute(f"""
         SELECT 
             e.id, e.student_id, e.status, e.amount_paid,
             e.pop_url, e.status_token,
@@ -6726,10 +6762,11 @@ def admin_enrollments():
         FROM enrollments e
         JOIN students st ON st.id = e.student_id
         JOIN subjects sub ON sub.id = e.subject_id
-        WHERE e.month = ?
+        {where_sql}
         ORDER BY e.created_at DESC
         LIMIT ? OFFSET ?
-    """, (month, limit, offset))
+    """, data_params)
+
     rows = cur.fetchall()
 
     # Returning students
@@ -6795,22 +6832,37 @@ def admin_enrollments():
 
     page_links = []
 
+    # Base query string (preserve search)
+    query_string = f"&q={q_safe}" if q else ""
+
     # First + Prev
     if page_num > 1:
-        page_links.append(f"<a class='links' href='?page=1'>« First</a>")
-        page_links.append(f"<a class='links' href='?page={page_num-1}'>‹ Prev</a>")
+        page_links.append(
+            f"<a class='links' href='?page=1{query_string}'>« First</a>"
+        )
+        page_links.append(
+            f"<a class='links' href='?page={page_num-1}{query_string}'>‹ Prev</a>"
+        )
 
     # Numbered pages
     for p in range(start, end + 1):
         if p == page_num:
-            page_links.append(f"<span class='current' style='padding:4px 8px;background:#0f172a;color:white;border-radius:6px'>{p}</span>")
+            page_links.append(
+                f"<span class='current' style='padding:4px 8px;background:#0f172a;color:white;border-radius:6px'>{p}</span>"
+            )
         else:
-            page_links.append(f"<a class='links' href='?page={p}'>{p}</a>")
+            page_links.append(
+                f"<a class='links' href='?page={p}{query_string}'>{p}</a>"
+            )
 
     # Next + Last
     if page_num < total_pages:
-        page_links.append(f"<a class='links' href='?page={page_num+1}'>Next ›</a>")
-        page_links.append(f"<a class='links' href='?page={total_pages}'>Last »</a>")
+        page_links.append(
+            f"<a class='links' href='?page={page_num+1}{query_string}'>Next ›</a>"
+        )
+        page_links.append(
+            f"<a class='links' href='?page={total_pages}{query_string}'>Last »</a>"
+        )
 
 
     nav = f"""
@@ -6860,9 +6912,17 @@ def admin_enrollments():
         <h1>Enrollments — {month}</h1>
 
         <div class='toolbar'>
-            <input id='enr_q' class='pill'
-                   placeholder='Search by name, phone, grade, subject'
-                   oninput="filterTable('enr_q','enr_tbl')"/>
+            <form method="get" style="display:flex;gap:8px;align-items:center">
+                <input type="text"
+                       name="q"
+                       value="{q_safe}"
+                       placeholder="Search name, phone, grade, subject, status"
+                       class="pill">
+
+                <input type="hidden" name="page" value="1">
+
+                <button class="btn mini">Search</button>
+            </form>
         </div>
 
         {nav}
@@ -7071,6 +7131,8 @@ def admin_students():
 
     total = cur.fetchone()['c']
     total_pages = (total + limit - 1) // limit
+    if total_pages == 0:
+        total_pages = 1
 
     params = []
     where_clauses = []
