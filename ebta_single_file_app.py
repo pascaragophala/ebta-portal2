@@ -1676,11 +1676,11 @@ background:#fff;
 }
 
 .follow-open{
-    background:#fff5f5 !important;
+    background:#d94848 !important;
 }
 
 .follow-paid{
-    background:#f0fff4 !important;
+    background:#35db37 !important;
 }
 .overdue{
     border-left:6px solid #dc2626 !important;
