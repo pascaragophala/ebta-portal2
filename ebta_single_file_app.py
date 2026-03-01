@@ -2086,7 +2086,7 @@ def page(title, body_html, extra_head="", extra_js=""):
                 SELECT COUNT(*)
                 FROM materials m
                 WHERE (m.is_assignment=1 OR m.kind='assignment') AND m.month=?
-                AND m.subject_id IN (SELECT subject_id FROM enrollments WHERE student_id=? AND month=? AND status='ACTIVE')
+                AND m.subject_id IN (SELECT subject_id FROM enrollments WHERE student_id=? AND month=? AND UPPER(status)='ACTIVE')
                 AND NOT EXISTS (SELECT 1 FROM submissions s WHERE s.material_id=m.id AND s.student_id=?)
             """, (month, sid, month, sid))
             pending = cur.fetchone()[0] or 0
@@ -3319,7 +3319,16 @@ def register():
     cur = conn.cursor()
 
     # Check existing student
-    cur.execute("SELECT id, pin FROM students WHERE phone_whatsapp=?", (phone,))
+    variants = phone_variants(phone)
+
+    placeholders = ",".join("?" * len(variants))
+
+    cur.execute(f"""
+        SELECT id, pin
+        FROM students
+        WHERE phone_whatsapp IN ({placeholders})
+        LIMIT 1
+    """, variants)
     srow = cur.fetchone()
 
     if srow:
@@ -3594,6 +3603,33 @@ def admin_registered():
     """
     return page('Registered students', body)
 
+@app.get("/admin/normalize-phones")
+def normalize_all_phones():
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, phone_whatsapp, phone_type FROM students")
+    rows = cur.fetchall()
+
+    for row in rows:
+        phone_type = row["phone_type"] or "SA"
+        normalized = normalize_phone(row["phone_whatsapp"], phone_type)
+
+        if normalized:
+            cur.execute(
+                "UPDATE students SET phone_whatsapp=? WHERE id=?",
+                (normalized, row["id"])
+            )
+
+    conn.commit()
+    conn.close()
+
+    return "All student numbers normalized safely."
+
 # ===================== Status page ==============
 @app.get('/status/<int:id>')
 def status(id: int):
@@ -3774,10 +3810,17 @@ def student_login_post():
         SELECT id, pin, full_name
         FROM students
         WHERE phone_whatsapp IN ({placeholders})
-        LIMIT 1
+        ORDER BY id DESC
     """, variants)
 
-    row = cur.fetchone()
+    rows = cur.fetchall()
+
+    row = None
+    for r in rows:
+        if r["pin"] == pin:
+            row = r
+            break
+
     conn.close()
 
     if not row or not row['pin'] or row['pin'] != pin:
@@ -3952,22 +3995,38 @@ def student_home():
     if r: return r
     sid = is_student()
     month = get_active_month('student')
+    print("DEBUG STUDENT ID:", sid)
+    print("DEBUG ACTIVE MONTH:", month)
+    print("DEBUG TYPE OF month:", month, len(month))
 
     conn=get_db(); cur=conn.cursor()
     
     # Determine year to show (use current system month year)
-    system_month = get_setting('current_month')
+    system_month = get_setting('current_month') or month
     year = int(system_month.split('-')[0])
 
     all_months = all_months_for_year(year)
 
-    # Months where student had at least one ACTIVE enrollment
+    # Months where student enrolled (any status)
     cur.execute("""
-        SELECT DISTINCT month
+        SELECT DISTINCT substr(month,1,7) AS month
+        FROM enrollments
+        WHERE student_id=?
+    """, (sid,))
+
+    rows_all = cur.fetchall()
+    enrolled_months = {r['month'] for r in rows_all}
+
+    # Months where student was ACTIVE
+    cur.execute("""
+        SELECT DISTINCT substr(month,1,7) AS month
         FROM enrollments
         WHERE student_id=? AND status='ACTIVE'
     """, (sid,))
-    active_months = {r['month'] for r in cur.fetchall()}
+
+    rows_active = cur.fetchall()
+    active_months = {r['month'] for r in rows_active}
+    
     
     month_selector = f"""
     <div class="card soft" style="margin-bottom:14px;border-left:5px solid #25D366">
@@ -4001,11 +4060,11 @@ def student_home():
                     f"{'selected' if m == month else ''}>"
                     f"{'✓ ' if m in active_months else ''}"
                     f"{pretty_month_label(m)}"
-                    f"{'' if m in active_months else ' (not enrolled)'}"
+                    f"{' (pending)' if m in enrolled_months and m not in active_months else ''}"
+                    f"{' (not enrolled)' if m not in enrolled_months else ''}"
                     f"</option>"
                     for m in all_months
                 )}
-
             </select>
 
         </form>
@@ -4024,28 +4083,59 @@ def student_home():
         </form>
         """
 
+
+    cur.execute("""
+        SELECT student_id, month, status
+        FROM enrollments
+        WHERE student_id=?
+    """, (sid,))
+    debug_rows = cur.fetchall()
+    print("DEBUG ENROLLMENTS:", [dict(r) for r in debug_rows])
+    
     # Enrollments this month
     cur.execute("""
     SELECT e.subject_id, e.status, s.name AS subject_name, s.grade
-    FROM enrollments e JOIN subjects s ON s.id=e.subject_id
-    WHERE e.student_id=? AND e.month=? ORDER BY s.grade,s.name
-    """,(sid,month))
-    enrolls=cur.fetchall()
-    active_sub_ids=[str(x['subject_id']) for x in enrolls if x['status']=='ACTIVE']
-    has_active_enrollment = month in active_months
+    FROM enrollments e 
+    JOIN subjects s ON s.id=e.subject_id
+    WHERE e.student_id=? 
+    AND e.month LIKE ?
+    ORDER BY s.grade,s.name
+    """,(sid, month + "%"))
+
+    enrolls = cur.fetchall()   # FETCH IMMEDIATELY
+
+    # Debug AFTER fetching
+    cur.execute("""
+        SELECT month, LENGTH(month) as len
+        FROM enrollments
+        WHERE student_id=?
+    """, (sid,))
+    print("DEBUG RAW MONTHS IN DB:", [dict(r) for r in cur.fetchall()])
+    
+    active_sub_ids=[str(x['subject_id']) for x in enrolls if x['status'].upper()=='ACTIVE']
+    has_active_enrollment = any(x['status'].upper() == 'ACTIVE' for x in enrolls)
     
     enroll_cta = ""
 
-    if month == system_month and not has_active_enrollment:
+    if not enrolls:
         enroll_cta = f"""
         <div class='card soft' style="display:block !important; width:100%; margin-top:12px;">
             <h3>Not enrolled for {pretty_month_label(month)}</h3>
             <p class='muted'>
-                Enrollments status pending. You can add subjects now.
+                You were not enrolled for this month.
             </p>
             <a class='btn' href='{url_for("home")}' style="display:inline-block;">
                 Enroll now
             </a>
+        </div>
+        """
+    elif not has_active_enrollment:
+        enroll_cta = f"""
+        <div class='card soft' style="display:block !important; width:100%; margin-top:12px;">
+            <h3>Enrollment pending for {pretty_month_label(month)}</h3>
+            <p class='muted'>
+                Your enrollment is still pending approval.
+            </p>
         </div>
         """
 
@@ -4197,18 +4287,9 @@ def student_home():
             JOIN subjects sub ON sub.id=m.subject_id
             JOIN tutors t ON t.id=m.tutor_id
             WHERE m.subject_id IN ({','.join('?'*len(active_sub_ids))})
-              AND (
-                    m.month = ?
-                    OR EXISTS (
-                        SELECT 1 FROM enrollments e
-                        WHERE e.student_id = ?
-                        AND e.subject_id = m.subject_id
-                        AND e.status = 'ACTIVE'
-                        AND e.month = m.month
-                    )
-              )
+              AND m.month LIKE ?
             ORDER BY sub.grade, sub.name, m.created_at DESC
-        """, (*active_sub_ids, month, sid))
+        """, (*active_sub_ids, month + "%"))
 
         mats = cur.fetchall()
         
@@ -7102,56 +7183,56 @@ def enrollment_action(id: int, action: str):
     conn.close()
 
     # --- Notifications: enrollment approved ---
-    try:
-        if action == 'approve' and notify_phone and notify_pin:
-            base_url = (request.url_root or '').rstrip('/')
-            portal_link = base_url
-            login_link = base_url + url_for('student_login')
+    #   try:
+    #       if action == 'approve' and notify_phone and notify_pin:
+    #           base_url = (request.url_root or '').rstrip('/')
+    #           portal_link = base_url
+    #           login_link = base_url + url_for('student_login')
+    #
+    #           month_label = pretty_month_label(notify_month) if notify_month else ""
+    #           grade_label_txt = grade_label(notify_grade) if notify_grade else ""
+    #           first_name = notify_name.split()[0] if notify_name else ""
 
-            month_label = pretty_month_label(notify_month) if notify_month else ""
-            grade_label_txt = grade_label(notify_grade) if notify_grade else ""
-            first_name = notify_name.split()[0] if notify_name else ""
+    #           email_subject = "EBTA enrollment approved"
+    #           email_body_lines = [
+    #               f"Hi {notify_name},",
+    #               "",
+    #               "Your EBTA enrollment has been approved.",
+    #           ]
+    #           if grade_label_txt or notify_subject or month_label:
+    #               detail = " ".join(x for x in [grade_label_txt, notify_subject, month_label] if x)
+    #               if detail.strip():
+    #                   email_body_lines.append(f"Subject/month: {detail}")
+    #                   email_body_lines.append("")
+    #           email_body_lines.extend([
+    #               "Login details (keep these safe):",
+    #               f"WhatsApp number: {notify_phone}",
+    #               f"PIN: {notify_pin}",
+    #               f"Portal: {portal_link}",
+    #               f"Student login: {login_link}",
+    #               "",
+    #               "You can now log in to your EBTA portal to access materials, assignments, and WhatsApp links (where available).",
+    #               "",
+    #               "If you did not request this change, please contact EBTA support.",
+    #           ])
+    #           email_body = "\n".join(email_body_lines)
 
-            email_subject = "EBTA enrollment approved"
-            email_body_lines = [
-                f"Hi {notify_name},",
-                "",
-                "Your EBTA enrollment has been approved.",
-            ]
-            if grade_label_txt or notify_subject or month_label:
-                detail = " ".join(x for x in [grade_label_txt, notify_subject, month_label] if x)
-                if detail.strip():
-                    email_body_lines.append(f"Subject/month: {detail}")
-                    email_body_lines.append("")
-            email_body_lines.extend([
-                "Login details (keep these safe):",
-                f"WhatsApp number: {notify_phone}",
-                f"PIN: {notify_pin}",
-                f"Portal: {portal_link}",
-                f"Student login: {login_link}",
-                "",
-                "You can now log in to your EBTA portal to access materials, assignments, and WhatsApp links (where available).",
-                "",
-                "If you did not request this change, please contact EBTA support.",
-            ])
-            email_body = "\n".join(email_body_lines)
-
-            sms_body_parts = [
-                f"EBTA: Hi {first_name}, your enrollment is APPROVED.",
-            ]
-            if month_label or grade_label_txt or notify_subject:
-                detail = " ".join(x for x in [grade_label_txt, notify_subject, month_label] if x)
-                sms_body_parts.append(detail + ".")
-            sms_body_parts.append(f"Login with WhatsApp {notify_phone} + PIN {notify_pin} at {login_link}.")
-            sms_body = " ".join(sms_body_parts)
-
-            if notify_email:
-                send_email_notification(notify_email, email_subject, email_body)
-            if notify_phone:
-                send_sms_notification(notify_phone, sms_body)
-    except Exception:
-        # Never break the admin flow if notifications fail
-        pass
+    #           sms_body_parts = [
+    #               f"EBTA: Hi {first_name}, your enrollment is APPROVED.",
+    #           ]
+    #           if month_label or grade_label_txt or notify_subject:
+    #               detail = " ".join(x for x in [grade_label_txt, notify_subject, month_label] if x)
+    #               sms_body_parts.append(detail + ".")
+    #           sms_body_parts.append(f"Login with WhatsApp {notify_phone} + PIN {notify_pin} at {login_link}.")
+    #           sms_body = " ".join(sms_body_parts)
+    #
+    #           if notify_email:
+    #               send_email_notification(notify_email, email_subject, email_body)
+    #           if notify_phone:
+    #               send_sms_notification(notify_phone, sms_body)
+    #   except Exception:
+            # Never break the admin flow if notifications fail
+    #       pass
 
     return redirect(url_for('admin_enrollments', page=page_num))
 
@@ -7555,7 +7636,7 @@ def admin_students_compare_export():
         FROM students s
         JOIN enrollments e ON e.student_id = s.id
         WHERE e.month = ?
-          AND e.status = 'ACTIVE'
+          AND e.status IN ('ACTIVE','PENDING')
     """, (curr_month,))
     curr_rows = cur.fetchall()
 
