@@ -246,6 +246,64 @@ def init_db():
     );
     """)
     
+    
+    # ================= FOLLOW UPS =================
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS followups(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name TEXT NOT NULL,
+        phone TEXT,
+        grade TEXT,
+        subjects TEXT,
+        followup_status TEXT DEFAULT 'OPEN',
+        payment_date TEXT,
+        date_communicated TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    );
+    """)
+    
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tutor_weekly_tracker(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tutor_id INTEGER NOT NULL,
+        subject TEXT,
+        grade TEXT,
+        session_date TEXT,
+
+        session_held INTEGER,
+        start_time TEXT,
+        end_time TEXT,
+        reason_missed TEXT,
+
+        recording_link TEXT,
+        recording_posted INTEGER,
+        posted_within_24h INTEGER,
+        extra_resources INTEGER,
+
+        students_attended INTEGER,
+        topic_covered TEXT,
+        activity_given TEXT,
+
+        issues_flags TEXT,
+        manager_comments TEXT,
+        cao_review_status TEXT,
+
+        created_at TEXT
+    );
+    """)
+    
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tutor_managers(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name TEXT NOT NULL,
+        phone TEXT UNIQUE,
+        pin TEXT,
+        created_at TEXT NOT NULL
+    );
+    """)
+
+    
     ensure_column(conn, "students", "guardian_name", "TEXT")
     ensure_column(conn, "materials", "is_assignment", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "materials", "due_date", "TEXT")
@@ -261,6 +319,10 @@ def init_db():
     ensure_column(conn, "students", "guardian_phone_type", "TEXT DEFAULT 'SA'")
     ensure_column(conn, "sessions", "meeting_id", "TEXT")
     ensure_column(conn, "sessions", "meeting_passcode", "TEXT")
+    ensure_column(conn, "followups", "issue_type", "TEXT")
+    ensure_column(conn, "followups", "captured_by", "TEXT")
+    ensure_column(conn, "followups", "updated_by", "TEXT")
+    ensure_column(conn, "followups", "updated_at", "TEXT")
 
 
 
@@ -278,6 +340,8 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_students_school ON students(school)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tutor_subjects_tutor ON tutor_subjects(tutor_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tutor_subjects_tutor ON tutor_subjects(tutor_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_followups_name ON followups(full_name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_followups_status ON followups(followup_status)")
 
 
 
@@ -342,24 +406,7 @@ def init_db():
     );
     """)
     
-    # ================= FOLLOW UPS =================
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS followups(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        full_name TEXT NOT NULL,
-        phone TEXT,
-        grade TEXT,
-        subjects TEXT,
-        followup_status TEXT DEFAULT 'OPEN',
-        payment_date TEXT,
-        date_communicated TEXT,
-        notes TEXT,
-        created_at TEXT NOT NULL
-    );
-    """)
-
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_followups_name ON followups(full_name)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_followups_status ON followups(followup_status)")
+    
     
 
     # Defaults & seed
@@ -668,6 +715,14 @@ def require_student():
     if not is_student(): return redirect(url_for('student_login'))
 def require_tutor():
     if not is_tutor(): return redirect(url_for('tutor_login'))
+    
+    
+def is_tutor_manager():
+    return session.get("manager_id")
+
+def require_manager():
+    if not is_tutor_manager():
+        return redirect(url_for("manager_login"))    
 
 def secure_name(name):
     keep="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
@@ -1666,35 +1721,74 @@ background:#fff;
     color: #059669;
 }
 
-/* Followups table improvements */
+/* ================= FOLLOWUPS TABLE ================= */
+
+.followups-table {
+    table-layout: auto;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
 .followups-table th,
 .followups-table td{
-    min-width:120px;
-    vertical-align:middle;
+    min-width:130px;
+    vertical-align:top;
+    padding:10px;
+    white-space:normal;
+    word-break:break-word;
 }
 
+/* Inputs fill cells properly */
 .followups-table input,
-.followups-table select{
-    min-width:120px;
-}
-
+.followups-table select,
 .followups-table textarea{
-    min-width:180px;
+    width:100%;
+    min-width:130px;
+    box-sizing:border-box;
 }
 
-.followups-table td.notes-cell{
+/* Notes wider */
+.followups-table td:nth-child(11){
     min-width:220px;
 }
 
+/* Make notes field taller */
+.followups-table input[name="notes"]{
+    min-height:38px;
+}
+
+/* Row status colours */
 .follow-open{
-    background:#d94848 !important;
+    background:#fff1f1 !important;
 }
 
 .follow-paid{
-    background:#35db37 !important;
+    background:#e9fbe9 !important;
 }
+
 .overdue{
     border-left:6px solid #dc2626 !important;
+}
+
+/* Make table horizontally scrollable nicely */
+.scroll-x{
+    overflow-x:auto;
+}
+.follow-progress {
+    background:#fff7e6 !important;
+}
+
+.follow-awaiting {
+    background:#eef6ff !important;
+}
+
+.visible-date-highlight{
+    color: var(--primary);
+    font-weight: 700;
+    background: #e8f5e9;
+    padding: 2px 6px;
+    border-radius: 6px;
 }
 </style>
 """
@@ -2673,7 +2767,8 @@ def home():
             <label class="payment-confirm">
                 <input type="checkbox" id="paid_check" name="paid_check" />
                 <span class="mini" id="payment_text">
-                    Payment has been made and I will upload the Proof of Payment now.
+                    Payment has been made and I will upload the Proof of Payment now that has 
+                    <span class="visible-date-highlight">visible date</span>.
                 </span>
             </label>
 
@@ -4004,6 +4099,10 @@ def student_home():
     if r: return r
     sid = is_student()
     month = get_active_month('student')
+    now = datetime.datetime.now(ZoneInfo("Africa/Johannesburg"))
+    real_month = now.strftime("%Y-%m")
+
+    is_current_month = (month == real_month)
     print("DEBUG STUDENT ID:", sid)
     print("DEBUG ACTIVE MONTH:", month)
     print("DEBUG TYPE OF month:", month, len(month))
@@ -4153,7 +4252,7 @@ def student_home():
     # WhatsApp links for enrolled subjects
     group_html = "<div class='empty'>No group links yet.</div>"
 
-    if has_active_enrollment and active_sub_ids:
+    if is_current_month and has_active_enrollment and active_sub_ids:
 
         q = f"""
         SELECT g.subject_id, g.invite_link, s.name, s.grade
@@ -4193,7 +4292,7 @@ def student_home():
                            target="_blank"
                            href="{r['invite_link']}">
 
-                           Join Group
+                           Click to Join Whatsapp Group
 
                         </a>
 
@@ -4211,7 +4310,7 @@ def student_home():
 
     # Sessions + Meet link for enrolled subjects
     sessions_html="<div class='empty'>No sessions yet.</div>"
-    if has_active_enrollment and active_sub_ids:
+    if is_current_month and has_active_enrollment and active_sub_ids:
         q=f"""SELECT s.subject_id, sub.name AS subject_name, sub.grade, s.day_of_week, s.start_time, s.end_time, s.meet_link,s.meeting_id,s.meeting_passcode
             FROM sessions s JOIN subjects sub ON sub.id=s.subject_id
             WHERE s.active=1 AND s.subject_id IN ({','.join('?'*len(active_sub_ids))})
@@ -4231,7 +4330,7 @@ def student_home():
                     <a class="btn success mini"
                        target="_blank"
                        href="{r['meet_link']}">
-                       Join Class Session
+                       Click to Join Class Session
                     </a>
                     """
 
@@ -4812,7 +4911,32 @@ def student_home():
         </div>
         """
 
+    # ================= CONDITIONAL LIVE ACCESS =================
 
+    groups_section = ""
+    sessions_section = ""
+
+    if is_current_month and has_active_enrollment and active_sub_ids:
+
+        groups_section = f"""
+        <div class='card' style="border-left:5px solid #25D366">
+            <h2>Subject WhatsApp Groups</h2>
+
+            <div class="mini muted" style="margin-bottom:12px">
+                Join your subject-specific WhatsApp groups for class communication.
+            </div>
+
+            {group_html}
+        </div>
+        """
+
+        sessions_section = f"""
+        <div class='card'>
+            <h2>Sessions</h2>
+            {sessions_html}
+        </div>
+        """
+    
     body=fr"""
     <section class='grid'>
     <div class='card'>
@@ -4859,24 +4983,10 @@ def student_home():
         </div>
 
     </div>
+    
+    {groups_section}
+    {sessions_section}
 
-
-
-    <div class='card' style="border-left:5px solid #25D366">
-
-        <h2 style="display:flex;align-items:center;gap:8px">
-            Subject WhatsApp Groups
-        </h2>
-
-        <div class="mini muted" style="margin-bottom:12px">
-            Join your subject-specific WhatsApp groups for class communication.
-        </div>
-
-        {group_html}
-
-    </div>
-
-    <div class='card'><h2>Sessions</h2>{sessions_html}</div>
     <div class='card'><h2>Materials & Assignments</h2><div class='scroll-x'>{materials_html}</div></div>
 {(''.join(submit_blocks)) if submit_blocks else ''}
 
@@ -5616,9 +5726,15 @@ def tutor_home():
     """
 
     # Your uploads (delete within 24h)
-    cur.execute("""SELECT m.*, s.name AS subject_name, s.grade
-                FROM materials m JOIN subjects s ON s.id=m.subject_id
-                WHERE m.tutor_id=? ORDER BY m.created_at DESC LIMIT 200""",(tid,))
+    cur.execute("""
+        SELECT m.*, s.name AS subject_name, s.grade
+        FROM materials m 
+        JOIN subjects s ON s.id=m.subject_id
+        WHERE m.tutor_id=?
+          AND m.month LIKE ?
+        ORDER BY m.created_at DESC
+        LIMIT 200
+    """,(tid, month + "%"))
     mymats=cur.fetchall()
     def can_delete(ts, admin_unlocked):
         if admin_unlocked == 1:
@@ -5761,9 +5877,16 @@ def tutor_home():
         uploads_html = "<div class='empty'>No uploads yet.</div>"
 
     # Assignments you posted (manage submissions)
-    cur.execute("""SELECT m.id, m.title, m.due_date, m.max_points, s.name AS subject_name, s.grade
-                FROM materials m JOIN subjects s ON s.id=m.subject_id
-                WHERE m.tutor_id=? AND (m.is_assignment=1 OR m.kind='assignment') ORDER BY m.created_at DESC""",(tid,))
+    cur.execute("""
+        SELECT m.id, m.title, m.due_date, m.max_points,
+               s.name AS subject_name, s.grade
+        FROM materials m 
+        JOIN subjects s ON s.id=m.subject_id
+        WHERE m.tutor_id=? 
+          AND (m.is_assignment=1 OR m.kind='assignment')
+          AND m.month LIKE ?
+        ORDER BY m.created_at DESC
+    """,(tid, month + "%"))
     asg=cur.fetchall()
     asg_rows="".join([f"<tr><td>{grade_label(a['grade'])} — {a['subject_name']}</td><td>{a['title']}</td><td>Due: {a['due_date'] or '—'}</td><td>Total: {a['max_points'] or 100}</td><td><a class='links' href='{url_for('tutor_assignment_manage', mid=a['id'])}'>Manage</a></td></tr>" for a in asg]) or "<tr><td colspan='5'><div class='empty'>No assignments yet.</div></td></tr>"
 
@@ -6857,23 +6980,35 @@ def admin_logout():
 
 
 def admin_nav():
+    links = []
+
+    # Always visible to all admins
+    links.append(f"<a class='btn secondary' href='{url_for('admin_home')}'>Dashboard</a>")
+    links.append(f"<a class='btn secondary' href='{url_for('admin_enrollments')}'>Enrollments</a>")
+    links.append(f"<a class='btn secondary' href='{url_for('admin_students')}'>Students</a>")
+    links.append(f"<a class='btn secondary' href='{url_for('admin_followups')}'>Follow-Ups</a>")
+    links.append(f"<a class='btn secondary' href='{url_for('admin_direct_messages')}'>Direct Msgs</a>")
+    links.append(f"<a class='btn secondary' href='{url_for('admin_tutor_tracker')}'>Tutor Tracker</a>")
+
+    # Only HIGH admin can see these
+    if is_high_admin():
+        links.extend([
+            f"<a class='btn secondary' href='{url_for('admin_tutors')}'>Tutors</a>",
+            f"<a class='btn secondary' href='{url_for('admin_groups')}'>Groups</a>",
+            f"<a class='btn secondary' href='{url_for('admin_sessions')}'>Sessions</a>",
+            f"<a class='btn secondary' href='{url_for('admin_messages')}'>Inbox</a>",
+            f"<a class='btn secondary' href='{url_for('admin_analytics')}'>Analytics</a>",
+            f"<a class='btn secondary' href='{url_for('admin_settings')}'>Settings</a>",
+            f"<a class='btn secondary' href='{url_for('admin_uploads_control')}'>Uploads Control</a>",
+            f"<a class='btn secondary' href='{url_for('admin_materials')}'>Unlock Uploads</a>",
+            
+            f"<a class='btn secondary' href='{url_for('admin_sms_dashboard')}'>SMS Dashboard</a>",
+            f"<a class='btn secondary' href='{url_for('admin_process_sms')}'>Processed SMS</a>",
+        ])
+
     return f"""
     <nav class="admin-nav">
-        <a class="btn secondary" href="{url_for('admin_home')}">Dashboard</a>
-        <a class="btn secondary" href="{url_for('admin_enrollments')}">Enrollments</a>
-        <a class="btn secondary" href="{url_for('admin_students')}">Students</a>
-        <a class="btn secondary" href="{url_for('admin_tutors')}">Tutors</a>
-        <a class="btn secondary" href="{url_for('admin_groups')}">Groups</a>
-        <a class="btn secondary" href="{url_for('admin_sessions')}">Sessions</a>
-        <a class="btn secondary" href="{url_for('admin_messages')}">Inbox</a>
-        <a class="btn secondary" href="{url_for('admin_analytics')}">Analytics</a>
-        <a class="btn secondary" href="{url_for('admin_settings')}">Settings</a>
-        <a class="btn secondary" href="{url_for('admin_uploads_control')}">Uploads Control</a>
-        <a class="btn secondary" href="{url_for('admin_materials')}">Unlock Uploads</a>
-        <a class="btn secondary" href="{url_for('admin_direct_messages')}">Direct Msgs</a>
-        <a class="btn secondary" href="{url_for('admin_sms_dashboard')}">SMS Dashboard</a>
-        <a class="btn secondary" href="{url_for('admin_process_sms')}">Processed SMS</a>
-        <a class="btn secondary" href="{url_for('admin_followups')}">Follow-Ups</a>
+        {''.join(links)}
     </nav>
     """
 
@@ -6910,6 +7045,7 @@ def admin_home():
     <a class='btn secondary' href='{url_for('admin_settings')}'>Settings</a>
     <a class="btn secondary" href="{url_for('admin_uploads_control')}">Uploads Control</a>
     <a class="btn secondary" href="{url_for('admin_materials')}">Unlock Uploads</a>
+    <a class="btn secondary" href="{url_for('admin_tutor_tracker')}">Tutor Tracker</a>
 
     </div></section>"""
     return page("Admin", body)
@@ -7274,11 +7410,13 @@ def enrollment_action(id: int, action: str):
                 "",
                 "Your EBTA enrollment has been approved.",
             ]
+
             if grade_label_txt or notify_subject or month_label:
                 detail = " ".join(x for x in [grade_label_txt, notify_subject, month_label] if x)
                 if detail.strip():
                     email_body_lines.append(f"Subject/month: {detail}")
                     email_body_lines.append("")
+
             email_body_lines.extend([
                 "Login details (keep these safe):",
                 f"WhatsApp number: {notify_phone}",
@@ -7286,19 +7424,33 @@ def enrollment_action(id: int, action: str):
                 f"Portal: {portal_link}",
                 f"Student login: {login_link}",
                 "",
-                "You can now log in to your EBTA portal to access materials, assignments, and WhatsApp links (where available).",
+                "You can now log in to your EBTA portal to access materials, assignments, session links and WhatsApp groups.",
                 "",
-                "If you did not request this change, please contact EBTA support.",
+                "IMPORTANT:",
+                "Please make sure you join ALL WhatsApp groups for the subjects you are enrolled in.",
+                "These groups are used for class communication, updates and live session reminders.",
+                "If you do not join the groups, you may miss important information.",
+                "",
+                "If you have any questions, please contact EBTA support.",
             ])
             email_body = "\n".join(email_body_lines)
 
             sms_body_parts = [
                 f"EBTA: Hi {first_name}, your enrollment is APPROVED.",
             ]
+
             if month_label or grade_label_txt or notify_subject:
                 detail = " ".join(x for x in [grade_label_txt, notify_subject, month_label] if x)
                 sms_body_parts.append(detail + ".")
-            sms_body_parts.append(f"Login with WhatsApp {notify_phone} + PIN {notify_pin} at {login_link}.")
+
+            sms_body_parts.append(
+                f"Login with WhatsApp {notify_phone} + PIN {notify_pin} at {login_link}."
+            )
+
+            sms_body_parts.append(
+                "Join ALL subject WhatsApp groups inside your portal."
+            )
+
             sms_body = " ".join(sms_body_parts)
 
             if notify_email:
@@ -7463,6 +7615,7 @@ def admin_students():
             <td>{pin}</td>
             <td style="white-space:nowrap">
 
+                {f"""
                 <a class='btn mini'
                    href='{url_for("admin_student_edit", sid=s["id"])}'>
                    Edit
@@ -7484,6 +7637,7 @@ def admin_students():
                         Delete
                     </button>
                 </form>
+                """ if is_high_admin() else ""}
 
             </td>
         </tr>
@@ -7851,6 +8005,9 @@ def admin_student_edit(sid):
     r = require_admin()
     if r:
         return r
+        
+    if not is_high_admin():
+        return page("Access Denied", card_msg("You do not have permission to perform this action."))
 
     conn = get_db()
     cur = conn.cursor()
@@ -7958,6 +8115,9 @@ def admin_student_update(sid):
     r = require_admin()
     if r:
         return r
+        
+    if not is_high_admin():
+        return page("Access Denied", card_msg("You do not have permission to perform this action."))
 
     full_name = request.form.get("full_name","").strip()
     phone = request.form.get("phone_whatsapp","").strip()
@@ -8009,6 +8169,10 @@ def admin_student_add():
     r = require_admin()
     if r:
         return r
+        
+    if not is_high_admin():
+        return page("Access Denied", card_msg("You do not have permission to perform this action."))
+    
     full_name = request.form.get('full_name','').strip()
     phone = normalize_phone(request.form.get('phone',''))
     grade = request.form.get('grade','').strip()
@@ -8041,6 +8205,10 @@ def admin_student_reset_pin(sid:int):
     r = require_admin()
     if r:
         return r
+    
+    if not is_high_admin():
+        return page("Access Denied", card_msg("You do not have permission to perform this action."))
+    
     conn = get_db()
     cur = conn.cursor()
     pins = set()
@@ -8059,6 +8227,9 @@ def admin_student_delete(sid: int):
     r = require_admin()
     if r:
         return r
+        
+    if not is_high_admin():
+        return page("Access Denied", card_msg("You do not have permission to perform this action."))
 
     conn = get_db()
     try:
@@ -8150,8 +8321,8 @@ def admin_tutors():
             f"<td>{pin}</td>"
             f"<td>{mapped}</td>"
             f"<td>"
-            f"<form method='post' action='{url_for('admin_tutor_reset_pin', tid=t['id'])}' style='display:inline'><button class='btn success'>Reset PIN</button></form> "
-            f"<form method='post' action='{url_for('admin_tutor_delete', tid=t['id'])}' style='display:inline' onsubmit='return confirm(\"Delete this tutor?\")'><button class='btn danger'>Delete</button></form>"
+            f"<a href='{url_for('admin_tutor_edit', tid=t['id'])}' class='btn secondary mini'>Edit</a> "
+            f"<form method='post' action='{url_for('admin_tutor_reset_pin', tid=t['id'])}' style='display:inline'><button class='btn success mini'>Reset PIN</button></form> "              
             f"<form method='post' action='{url_for('admin_tutor_add_subject', tid=t['id'])}' class='inlineform' style='margin-left:8px'>"
             f"<select name='subject_id'>{options}</select><button class='btn mini'>Add subject</button></form>"
             f"</td></tr>"
@@ -8178,6 +8349,73 @@ def admin_tutors():
     </section>
     """
     return page("Tutors", body)
+    
+@app.get('/admin/tutors/<int:tid>/edit')
+@require_high_admin
+def admin_tutor_edit(tid: int):
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tutors WHERE id=?", (tid,))
+    tutor = cur.fetchone()
+    conn.close()
+
+    if not tutor:
+        return page("Error", card_msg("Tutor not found."))
+
+    body = f"""
+    {admin_nav()}
+    <section class='card small'>
+        <h1>Edit Tutor</h1>
+        <form method='post' action='{url_for('admin_tutor_update', tid=tid)}' class='grid'>
+            <div>
+                <label>Full Name</label>
+                <input name='full_name' value="{tutor['full_name']}" required>
+            </div>
+            <div>
+                <label>Phone</label>
+                <input name='phone' value="{tutor['phone']}" required>
+            </div>
+            <div>
+                <button class='btn'>Update Tutor</button>
+                <a href='{url_for('admin_tutors')}' class='btn secondary'>Cancel</a>
+            </div>
+        </form>
+    </section>
+    """
+    return page("Edit Tutor", body)
+    
+@app.post('/admin/tutors/<int:tid>/update')
+def admin_tutor_update(tid: int):
+    r = require_admin()
+    if r:
+        return r
+
+    full_name = request.form.get('full_name', '').strip()
+    phone = normalize_phone(request.form.get('phone', ''))
+
+    if not full_name or not phone:
+        return page("Error", card_msg("All fields are required."))
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            UPDATE tutors
+            SET full_name=?, phone=?
+            WHERE id=?
+        """, (full_name, phone, tid))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return page("Error", card_msg("Phone number already exists."))
+
+    conn.close()
+    return redirect(url_for('admin_tutors'))
 
 @app.post('/admin/tutors/add')
 def admin_tutor_add():
@@ -8742,12 +8980,18 @@ def admin_groups():
                 <td>{grade_label(s['grade'])} — {s['name']}</td>
                 <td><a class='links' target='_blank' href='{g['invite_link']}'>Open</a></td>
                 <td>{visibility}</td>
-                <td>
+                <td>                    
+                    <a class='btn mini' href='{url_for("admin_group_edit", gid=g["id"])}'>
+                        Edit
+                    </a>    
+                
                     <form method='post' action='{url_for('admin_group_toggle', gid=g['id'])}' style='display:inline'>
                         <button class='btn mini secondary'>
                             {'Hide' if g['is_visible'] else 'Show'}
                         </button>
                     </form>
+                    
+                    
                     <form method='post' action='{url_for('admin_group_delete', gid=g['id'])}'
                           style='display:inline'
                           onsubmit='return confirm("Delete this group link?")'>
@@ -8834,6 +9078,84 @@ def admin_groups_post():
     conn.close()
     return redirect(url_for('admin_groups'))
 
+    
+@app.get('/admin/groups/edit/<int:gid>')
+@require_high_admin
+def admin_group_edit(gid):
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT g.id, g.invite_link, g.is_visible,
+               s.name, s.grade
+        FROM groups g
+        JOIN subjects s ON s.id = g.subject_id
+        WHERE g.id=?
+    """, (gid,))
+    g = cur.fetchone()
+    conn.close()
+
+    if not g:
+        return page("Error", "<div class='card'>Group not found.</div>")
+
+    body = f"""
+    {admin_nav()}
+    <section class='card'>
+        <h1>Edit Group Link</h1>
+
+        <form method='post'>
+            <label>Subject</label>
+            <input value="{grade_label(g['grade'])} — {g['name']}" disabled />
+
+            <label style="margin-top:10px;">Invite Link</label>
+            <input name='invite_link' value="{g['invite_link']}" required />
+
+            <label style="margin-top:10px;">
+                <input type='checkbox' name='is_visible'
+                       {'checked' if g['is_visible'] else ''}>
+                Visible to students
+            </label>
+
+            <div style="margin-top:14px;">
+                <button class='btn'>Save Changes</button>
+                <a class='btn secondary' href="{url_for('admin_groups')}">Cancel</a>
+            </div>
+        </form>
+    </section>
+    """
+
+    return page("Edit Group", body)    
+    
+@app.post('/admin/groups/edit/<int:gid>')
+@require_high_admin
+def admin_group_edit_post(gid):
+    r = require_admin()
+    if r:
+        return r
+
+    invite_link = request.form.get('invite_link')
+    is_visible = 1 if request.form.get('is_visible') else 0
+
+    if not invite_link:
+        return page("Error", "<div class='card'>Invite link is required.</div>")
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE groups
+        SET invite_link=?, is_visible=?
+        WHERE id=?
+    """, (invite_link, is_visible, gid))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for('admin_groups'))
     
 @app.post('/admin/groups/delete/<int:gid>')
 def admin_group_delete(gid):
@@ -9298,6 +9620,11 @@ def admin_session_edit(sid):
     if not session_row:
         return redirect(url_for('admin_sessions'))
 
+    dow_options = ''.join([
+        f"<option value='{i}' {'selected' if i == session_row['day_of_week'] else ''}>{d}</option>"
+        for i, d in enumerate(DOW)
+    ])
+
     body = f"""
     {admin_nav()}
     <section class='card'>
@@ -9308,22 +9635,32 @@ def admin_session_edit(sid):
               class="grid"
               style="gap:10px">
 
+            <label>Day</label>
+            <select name="day_of_week">
+                {dow_options}
+            </select>
+
+            <label>Start Time</label>
             <input name="start_time"
                    value="{session_row['start_time']}"
                    required>
 
+            <label>End Time</label>
             <input name="end_time"
                    value="{session_row['end_time']}"
                    required>
 
+            <label>Meeting Link</label>
             <input name="meet_link"
                    value="{session_row['meet_link'] or ''}"
                    placeholder="Meet link">
 
+            <label>Meeting ID</label>
             <input name="meeting_id"
                    value="{session_row['meeting_id'] or ''}"
                    placeholder="Meeting ID">
 
+            <label>Meeting Passcode</label>
             <input name="meeting_passcode"
                    value="{session_row['meeting_passcode'] or ''}"
                    placeholder="Meeting Passcode">
@@ -9349,13 +9686,15 @@ def admin_session_update(sid):
 
     cur.execute("""
         UPDATE sessions
-        SET start_time=?,
+        SET day_of_week=?,
+            start_time=?,
             end_time=?,
             meet_link=?,
             meeting_id=?,
             meeting_passcode=?
         WHERE id=?
     """, (
+        request.form.get("day_of_week"),
         request.form.get("start_time"),
         request.form.get("end_time"),
         request.form.get("meet_link"),
@@ -9529,7 +9868,7 @@ def admin_messages():
     page_num = int(request.args.get("page", 1))
     q = request.args.get("q", "").strip()
 
-    limit = 50
+    limit = 30
     offset = (page_num - 1) * limit
 
     conn = get_db()
@@ -9833,7 +10172,6 @@ def admin_messages_resolve_all():
 # --- Admin: Direct Messages (student/tutor DMs) ---
 
 @app.get('/admin/direct-messages')
-@require_high_admin
 def admin_direct_messages():
 
     r = require_admin()
@@ -10713,6 +11051,15 @@ def admin_followups():
         cur.execute("SELECT * FROM followups ORDER BY created_at DESC")
 
     rows = cur.fetchall()
+    
+    ISSUE_TYPES = [
+        "Missing R50 Registration Fee",
+        "Payment Missing",
+        "Fake Upload",
+        "Returning Student Owing",
+        "PoP Issues",
+        "Other"
+    ]
 
     # get subjects for dropdown
     cur.execute("SELECT DISTINCT name FROM subjects ORDER BY name")
@@ -10732,7 +11079,11 @@ def admin_followups():
         row_class = ""
         if row["followup_status"] == "OPEN":
             row_class = "follow-open"
-        elif row["followup_status"] == "PAID":
+        elif row["followup_status"] == "IN PROGRESS":
+            row_class = "follow-progress"
+        elif row["followup_status"] == "AWAITING POP":
+            row_class = "follow-awaiting"
+        elif row["followup_status"] == "RESOLVED":
             row_class = "follow-paid"
 
         # -------- Overdue --------
@@ -10790,19 +11141,35 @@ def admin_followups():
                     )}
                 </select>
             </td>
+            
+            <td>
+            <select name="issue_type">
+            <option value="">Select</option>
+            {''.join(
+            f"<option value='{i}' {'selected' if row['issue_type']==i else ''}>{i}</option>"
+            for i in ISSUE_TYPES
+            )}
+            </select>
+            </td>
 
             <td>
                 <select name="followup_status">
-                    <option {'selected' if row['followup_status']=="OPEN" else ""}>OPEN</option>
-                    <option {'selected' if row['followup_status']=="PAID" else ""}>PAID</option>
-                    <option {'selected' if row['followup_status']=="NO RESPONSE" else ""}>NO RESPONSE</option>
-                    <option {'selected' if row['followup_status']=="DECLINED" else ""}>DECLINED</option>
+                    <option value="OPEN" {'selected' if row['followup_status']=="OPEN" else ""}>OPEN</option>
+                    <option value="IN PROGRESS" {'selected' if row['followup_status']=="IN PROGRESS" else ""}>IN PROGRESS</option>
+                    <option value="AWAITING POP" {'selected' if row['followup_status']=="AWAITING POP" else ""}>AWAITING POP</option>
+                    <option value="RESOLVED" {'selected' if row['followup_status']=="RESOLVED" else ""}>RESOLVED</option>
+                    <option value="DECLINED" {'selected' if row['followup_status']=="DECLINED" else ""}>DECLINED</option>
                 </select>
             </td>
+            
+            <td><span class="badge">{escape(row['captured_by'] or '')}</span></td>
+            <td><span class="badge">{escape(row['updated_by'] or '')}</span></td>
 
             <td><input type="date" name="payment_date" value="{row['payment_date'] or ''}"></td>
             <td><input type="date" name="date_communicated" value="{row['date_communicated'] or ''}"></td>
-            <td><input name="notes" value="{escape(row['notes'] or '')}"></td>
+            <td>
+            <textarea name="notes" rows="2">{escape(row['notes'] or '')}</textarea>
+            </td>
 
             <td><button class="btn mini success">Save</button></td>
         </form>
@@ -10833,7 +11200,10 @@ def admin_followups():
                     <th>Phone</th>
                     <th>Grade</th>
                     <th>Subjects</th>
+                    <th>Issue</th>
                     <th>Status</th>
+                    <th>Captured By</th>
+                    <th>Updated By</th>
                     <th>Payment</th>
                     <th>Communicated</th>
                     <th>Notes</th>
@@ -10841,7 +11211,7 @@ def admin_followups():
                 </tr>
             </thead>
             <tbody>
-                {''.join(trs) or "<tr><td colspan='9'>No followups yet.</td></tr>"}
+                {''.join(trs) or "<tr><td colspan='12'>No followups yet.</td></tr>"}
             </tbody>
         </table>
         </div>
@@ -10855,6 +11225,15 @@ def admin_followup_add():
     r = require_admin()
     if r:
         return r
+    
+    ISSUE_TYPES = [
+        "Missing R50 Registration Fee",
+        "Payment Missing",
+        "Fake Upload",
+        "Returning Student Owing",
+        "PoP Issues",
+        "Other"
+    ]
 
     conn = get_db()
     cur = conn.cursor()
@@ -10890,6 +11269,17 @@ def admin_followup_add():
                 <option value="">Select</option>
                 {subject_options}
             </select>
+            
+            <select name="issue_type" required>
+                <option value="">Select Issue Type</option>
+                {''.join(f"<option value='{i}'>{i}</option>" for i in ISSUE_TYPES)}
+            </select>
+
+            <select name="captured_by" required>
+                <option value="">Captured By</option>
+                <option value="Admin">Admin</option>
+                <option value="Admission COD">Admission COD</option>
+            </select>
 
             <input type="date" name="payment_date">
             <input type="date" name="date_communicated">
@@ -10910,20 +11300,32 @@ def admin_followup_create():
     cur = conn.cursor()
 
     cur.execute("""
-        INSERT INTO followups(
-            full_name, phone, grade, subjects,
-            payment_date, date_communicated,
-            notes, created_at
-        )
-        VALUES (?,?,?,?,?,?,?,?)
+    INSERT INTO followups(
+        full_name, phone, grade, subjects,
+        issue_type,
+        followup_status,
+        payment_date,
+        date_communicated,
+        notes,
+        captured_by,
+        updated_by,
+        updated_at,
+        created_at
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         request.form.get("full_name"),
         request.form.get("phone"),
         request.form.get("grade"),
         request.form.get("subjects"),
+        request.form.get("issue_type"),
+        "OPEN",
         request.form.get("payment_date"),
         request.form.get("date_communicated"),
         request.form.get("notes"),
+        request.form.get("captured_by"),
+        request.form.get("captured_by"),
+        now_utc_iso(),
         now_utc_iso()
     ))
 
@@ -10940,26 +11342,34 @@ def admin_followup_update(fid):
     conn = get_db()
     cur = conn.cursor()
 
+    admin_role = session.get("admin_role", "Admin")
+
     cur.execute("""
-        UPDATE followups SET
-            full_name=?,
-            phone=?,
-            grade=?,
-            subjects=?,
-            followup_status=?,
-            payment_date=?,
-            date_communicated=?,
-            notes=?
-        WHERE id=?
+    UPDATE followups SET
+        full_name=?,
+        phone=?,
+        grade=?,
+        subjects=?,
+        issue_type=?,
+        followup_status=?,
+        payment_date=?,
+        date_communicated=?,
+        notes=?,
+        updated_by=?,
+        updated_at=?
+    WHERE id=?
     """, (
         request.form.get("full_name"),
         request.form.get("phone"),
         request.form.get("grade"),
         request.form.get("subjects"),
+        request.form.get("issue_type"),
         request.form.get("followup_status"),
         request.form.get("payment_date"),
         request.form.get("date_communicated"),
         request.form.get("notes"),
+        admin_role,
+        now_utc_iso(),
         fid
     ))
 
@@ -10989,8 +11399,9 @@ def export_followups():
 
     writer.writerow([
         "Name","Phone","Grade","Subjects",
-        "Status","Payment Date",
-        "Communicated","Notes"
+        "Issue Type","Status",
+        "Payment Date","Communicated",
+        "Captured By","Updated By","Notes"
     ])
 
     for row in rows:
@@ -10999,9 +11410,12 @@ def export_followups():
             row["phone"],
             row["grade"],
             row["subjects"],
+            row["issue_type"],
             row["followup_status"],
             row["payment_date"],
             row["date_communicated"],
+            row["captured_by"],
+            row["updated_by"],
             row["notes"]
         ])
 
@@ -11009,6 +11423,354 @@ def export_followups():
     output.headers["Content-Disposition"] = "attachment; filename=followups.csv"
     output.headers["Content-type"] = "text/csv"
     return output
+
+
+@app.get('/admin/tutor-tracker')
+def admin_tutor_tracker():
+
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Load tutors dynamically
+    cur.execute("""
+    SELECT id, full_name
+    FROM tutors
+    ORDER BY full_name
+    """)
+    tutors = cur.fetchall()
+
+    today = datetime.date.today()
+
+    dates = [
+        today - datetime.timedelta(days=i)
+        for i in range(7)
+    ]
+
+    header = "<th>Date</th>"
+
+    for t in tutors:
+        header += f"<th>{t['full_name']}</th>"
+
+    rows = ""
+
+    for d in dates:
+
+        row = f"<td>{d}</td>"
+
+        for t in tutors:
+
+            cur.execute("""
+            SELECT session_held
+            FROM tutor_weekly_tracker
+            WHERE tutor_id=? AND session_date=?
+            """,(t["id"],str(d)))
+
+            entry = cur.fetchone()
+
+            color=""
+
+            if entry and entry["session_held"] == 0:
+                color="style='background:#fee2e2'"
+
+            row+=f"""
+            <td {color}>
+            <a href="/admin/tutor-tracker/edit?tutor_id={t['id']}&date={d}">
+            Update
+            </a>
+            </td>
+            """
+
+        rows+=f"<tr>{row}</tr>"
+
+    conn.close()
+
+    body=f"""
+    {admin_nav()}
+
+    <section class='card'>
+
+    <h1>Tutor Weekly Tracker</h1>
+
+    <div class='scroll-x'>
+
+    <table>
+
+    <thead>
+    <tr>{header}</tr>
+    </thead>
+
+    <tbody>
+    {rows}
+    </tbody>
+
+    </table>
+
+    </div>
+
+    </section>
+    """
+
+    return page("Tutor Tracker",body)
+    
+@app.get('/admin/tutor-tracker/edit')
+def tracker_edit():
+
+    tutor_id = request.args.get("tutor_id")
+    date = request.args.get("date")
+
+    conn=get_db()
+    cur=conn.cursor()
+
+    cur.execute("SELECT full_name FROM tutors WHERE id=?", (tutor_id,))
+    tutor=cur.fetchone()
+
+    conn.close()
+
+    body=f"""
+
+    {admin_nav()}
+
+    <section class='card'>
+
+    <h1>{tutor['full_name']} — {date}</h1>
+
+    <form method="post" action="/admin/tutor-tracker/save">
+
+    <input type="hidden" name="tutor_id" value="{tutor_id}">
+    <input type="hidden" name="date" value="{date}">
+
+    <label>Session Held?</label>
+    <select name="session_held">
+    <option value="1">Yes</option>
+    <option value="0">No</option>
+    </select>
+
+    <label>Start Time</label>
+    <input name="start_time">
+
+    <label>End Time</label>
+    <input name="end_time">
+
+    <label>Students Attended</label>
+    <input name="students_attended">
+
+    <label>Topic Covered</label>
+    <input name="topic_covered">
+
+    <label>Recording Link</label>
+    <input name="recording_link">
+
+    <label>Manager Comments</label>
+    <textarea name="manager_comments"></textarea>
+
+    <button class="btn success">Save</button>
+
+    </form>
+
+    </section>
+    """
+
+    return page("Tracker Entry",body)
+    
+@app.post('/admin/tutor-tracker/save')
+def tracker_save():
+
+    conn=get_db()
+    cur=conn.cursor()
+
+    cur.execute("""
+
+    INSERT INTO tutor_weekly_tracker(
+        tutor_id,
+        session_date,
+        session_held,
+        start_time,
+        end_time,
+        recording_link,
+        students_attended,
+        topic_covered,
+        manager_comments,
+        created_at
+    )
+
+    VALUES(?,?,?,?,?,?,?,?,?,?)
+
+    """,(
+
+    request.form.get("tutor_id"),
+    request.form.get("date"),
+    request.form.get("session_held"),
+    request.form.get("start_time"),
+    request.form.get("end_time"),
+    request.form.get("recording_link"),
+    request.form.get("students_attended"),
+    request.form.get("topic_covered"),
+    request.form.get("manager_comments"),
+    now_utc_iso()
+
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/admin/tutor-tracker")
+
+
+@app.route('/manager/login', methods=['GET','POST'])
+def manager_login():
+
+    if request.method == "POST":
+
+        phone = request.form.get("phone")
+        pin = request.form.get("pin")
+
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("""
+        SELECT * FROM tutor_managers
+        WHERE phone=? AND pin=?
+        """,(phone,pin))
+
+        row = cur.fetchone()
+        conn.close()
+
+        if row:
+
+            session.clear()
+            session["manager_id"] = row["id"]
+            session["manager_name"] = row["full_name"]
+
+            return redirect("/manager/tracker")
+
+    body = f"""
+    <section class='card auth-card'>
+
+    <h1>Tutor Manager Login</h1>
+
+    <form method="post">
+
+    <label>Phone</label>
+    <input name="phone" required>
+
+    <label>PIN</label>
+    <input name="pin" required>
+
+    <button class="btn success">Login</button>
+
+    </form>
+
+    </section>
+    """
+
+    return page("Manager Login", body)
+    
+@app.get('/manager/tracker')
+def manager_tracker():
+
+    r = require_manager()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    SELECT id, full_name
+    FROM tutors
+    ORDER BY full_name
+    """)
+
+    tutors = cur.fetchall()
+
+    today = datetime.date.today()
+
+    dates = [
+        today - datetime.timedelta(days=i)
+        for i in range(7)
+    ]
+
+    header = "<th>Date</th>"
+
+    for t in tutors:
+        header += f"<th>{t['full_name']}</th>"
+
+    rows=""
+
+    for d in dates:
+
+        row=f"<td>{d}</td>"
+
+        for t in tutors:
+
+            row+=f"""
+            <td>
+            <a href="/manager/tracker/edit?tutor_id={t['id']}&date={d}">
+            Update
+            </a>
+            </td>
+            """
+
+        rows+=f"<tr>{row}</tr>"
+
+    conn.close()
+
+    body=f"""
+
+    <section class='card'>
+
+    <h1>Weekly Tutor Tracker</h1>
+
+    <p class='muted'>Logged in as {session.get('manager_name')}</p>
+
+    <div class='scroll-x'>
+
+    <table>
+
+    <thead>
+    <tr>{header}</tr>
+    </thead>
+
+    <tbody>
+    {rows}
+    </tbody>
+
+    </table>
+
+    </div>
+
+    </section>
+    """
+
+    return page("Tutor Tracker",body)
+
+
+@app.post('/admin/managers/add')
+def admin_add_manager():
+
+    r=require_admin()
+    if r: return r
+
+    name=request.form.get("name")
+    phone=request.form.get("phone")
+    pin=request.form.get("pin")
+
+    conn=get_db()
+    cur=conn.cursor()
+
+    cur.execute("""
+    INSERT INTO tutor_managers(full_name,phone,pin,created_at)
+    VALUES(?,?,?,?)
+    """,(name,phone,pin,now_utc_iso()))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/admin")
 
 # --- Admin: Analytics dashboard ---
 
