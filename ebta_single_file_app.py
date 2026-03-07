@@ -11503,6 +11503,25 @@ def admin_tutor_tracker():
             <td>{m['full_name']}</td>
             <td>{m['phone']}</td>
             <td>{m['pin']}</td>
+
+            <td style="display:flex;gap:6px">
+
+                <a class="btn mini"
+                href="/admin/managers/edit/{m['id']}">
+                Edit
+                </a>
+
+                <form method="post"
+                action="/admin/managers/delete/{m['id']}"
+                onsubmit="return confirm('Delete this manager?')">
+
+                    <button class="btn mini danger">
+                    Delete
+                    </button>
+
+                </form>
+
+            </td>
         </tr>
         """
 
@@ -11560,6 +11579,7 @@ def admin_tutor_tracker():
                     <th>Name</th>
                     <th>Phone</th>
                     <th>PIN</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
 
@@ -11758,31 +11778,6 @@ def manager_tracker():
     """
 
     return page("Tutor Tracker",body)
-
-
-@app.post('/admin/managers/add')
-@require_high_admin
-def admin_add_manager():
-
-    r=require_admin()
-    if r: return r
-
-    name=request.form.get("name")
-    phone=request.form.get("phone")
-    pin=request.form.get("pin")
-
-    conn=get_db()
-    cur=conn.cursor()
-
-    cur.execute("""
-    INSERT INTO tutor_managers(full_name,phone,pin,created_at)
-    VALUES(?,?,?,?)
-    """,(name,phone,pin,now_utc_iso()))
-
-    conn.commit()
-    conn.close()
-
-    return redirect("/admin")
     
     
 @app.route('/manager/login', methods=['GET','POST'])
@@ -11947,6 +11942,88 @@ def admin_manager_add():
 
     return redirect(url_for("admin_tutor_tracker"))
 
+
+@app.route('/admin/managers/edit/<int:manager_id>', methods=['GET','POST'])
+@require_high_admin
+def admin_edit_manager(manager_id):
+
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+
+        name = request.form.get("name")
+        phone = request.form.get("phone")
+
+        cur.execute("""
+        UPDATE tutor_managers
+        SET full_name=?, phone=?
+        WHERE id=?
+        """,(name,phone,manager_id))
+
+        conn.commit()
+        conn.close()
+
+        return redirect(url_for("admin_tutor_tracker"))
+
+    cur.execute("""
+    SELECT *
+    FROM tutor_managers
+    WHERE id=?
+    """,(manager_id,))
+
+    manager = cur.fetchone()
+    conn.close()
+
+    body = f"""
+
+    {admin_nav()}
+
+    <section class='card'>
+
+    <h1>Edit Tutor Manager</h1>
+
+    <form method="post">
+
+    <label>Name</label>
+    <input name="name" value="{manager['full_name']}" required>
+
+    <label>Phone</label>
+    <input name="phone" value="{manager['phone']}" required>
+
+    <button class="btn success">Update Manager</button>
+
+    </form>
+
+    </section>
+    """
+
+    return page("Edit Manager", body)
+    
+@app.post('/admin/managers/delete/<int:manager_id>')
+@require_high_admin
+def admin_delete_manager(manager_id):
+
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    DELETE FROM tutor_managers
+    WHERE id=?
+    """,(manager_id,))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("admin_tutor_tracker"))
 
 # --- Admin: Analytics dashboard ---
 
