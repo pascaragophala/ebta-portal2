@@ -11840,7 +11840,8 @@ def manager_tracker():
 
             row+=f"""
             <td>
-            <a href="/manager/tracker/edit?tutor_id={t['id']}&date={date_str}">
+            <a class="btn mini"
+            href="/manager/tracker/edit?tutor_id={t['id']}&date={date_str}">
             Update
             </a>
             </td>
@@ -11851,6 +11852,8 @@ def manager_tracker():
     conn.close()
 
     body=f"""
+
+    {manager_nav()}
 
     <section class='card'>
 
@@ -11944,25 +11947,28 @@ def manager_dashboard():
 
     cur.execute("""
     SELECT COUNT(*) AS total
-    FROM tutors
-    """)
+    FROM manager_tutors
+    WHERE manager_id=?
+    """,(session["manager_id"],))
+
     total_tutors = cur.fetchone()["total"]
 
     today = datetime.date.today()
-
     week_start = today - datetime.timedelta(days=7)
 
     cur.execute("""
     SELECT COUNT(*) AS sessions
-    FROM tutor_weekly_tracker
-    WHERE session_date >= ?
-    """,(week_start.strftime("%Y-%m-%d"),))
+    FROM tutor_weekly_tracker tw
+    JOIN manager_tutors mt ON mt.tutor_id = tw.tutor_id
+    WHERE mt.manager_id=? AND tw.session_date >= ?
+    """,(session["manager_id"], week_start.strftime("%Y-%m-%d")))
 
     weekly_updates = cur.fetchone()["sessions"]
 
     conn.close()
 
     body = f"""
+    {manager_nav()}
 
     <section class='card'>
 
@@ -11976,12 +11982,12 @@ def manager_dashboard():
 
             <div class='stat'>
                 <div class='k'>{total_tutors}</div>
-                <div class='t'>Tutors in system</div>
+                <div class='t'>Your Tutors</div>
             </div>
 
             <div class='stat'>
                 <div class='k'>{weekly_updates}</div>
-                <div class='t'>Sessions logged this week</div>
+                <div class='t'>Sessions Logged This Week</div>
             </div>
 
         </div>
@@ -12001,17 +12007,17 @@ def manager_dashboard():
 
         <div class='muted'>
 
-        Use the tracker to record whether sessions were held,
-        upload recording links and capture tutor activity.
+        Use the tracker to record sessions, attendance and tutor activity.
 
         </div>
 
     </section>
-
     """
 
     return page("Manager Dashboard", body)
-
+    
+    
+    
 
 @app.get('/manager/tracker/edit')
 def manager_tracker_edit():
@@ -12033,40 +12039,77 @@ def manager_tracker_edit():
 
     body = f"""
 
+    {manager_nav()}
+
     <section class='card'>
 
-    <h1>{tutor['full_name']} — {date}</h1>
+    <h1>{tutor['full_name']} — Session Entry</h1>
+
+    <div class='toolbar'>
+
+        <a class="btn mini" href="/manager/tracker">
+        ← Back to Tracker
+        </a>
+
+    </div>
 
     <form method="post" action="/manager/tracker/save">
 
     <input type="hidden" name="tutor_id" value="{tutor_id}">
-    <input type="hidden" name="date" value="{date}">
 
-    <label>Session Held?</label>
-    <select name="session_held">
-    <option value="1">Yes</option>
-    <option value="0">No</option>
-    </select>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
 
-    <label>Start Time</label>
-    <input name="start_time">
+        <div>
+        <label>Session Date</label>
+        <input type="date" name="date" value="{date}" required>
+        </div>
 
-    <label>End Time</label>
-    <input name="end_time">
+        <div>
+        <label>Session Held</label>
+        <select name="session_held">
+        <option value="1">Yes</option>
+        <option value="0">No</option>
+        </select>
+        </div>
 
-    <label>Students Attended</label>
-    <input name="students_attended">
+        <div>
+        <label>Start Time</label>
+        <input type="time" name="start_time">
+        </div>
+
+        <div>
+        <label>End Time</label>
+        <input type="time" name="end_time">
+        </div>
+
+        <div>
+        <label>Students Attended</label>
+        <input type="number" name="students_attended" min="0">
+        </div>
+
+        <div>
+        <label>Recording Uploaded</label>
+        <select name="recording_link">
+        <option value="">No</option>
+        <option value="YES">Yes</option>
+        </select>
+        </div>
+
+    </div>
+
+    <br>
 
     <label>Topic Covered</label>
     <input name="topic_covered">
 
-    <label>Recording Link</label>
-    <input name="recording_link">
-
     <label>Manager Comments</label>
     <textarea name="manager_comments"></textarea>
 
-    <button class="btn success">Save</button>
+    <br>
+
+    <button class="btn success">
+    Save Session
+    </button>
 
     </form>
 
@@ -12074,6 +12117,7 @@ def manager_tracker_edit():
     """
 
     return page("Tracker Entry", body)
+    
 
 @app.post('/manager/tracker/save')
 def manager_tracker_save():
@@ -12393,6 +12437,36 @@ def admin_tutor_operations():
     """
 
     return page("Tutor Operations", body)
+    
+
+@app.get('/manager/logout')
+def manager_logout():
+
+    session.pop("manager_id", None)
+    session.pop("manager_name", None)
+
+    return redirect(url_for("manager_login"))
+    
+def manager_nav():
+
+    return f"""
+    <div class="admin-nav">
+
+        <a class="btn mini" href="/manager/dashboard">
+        Dashboard
+        </a>
+
+        <a class="btn mini" href="/manager/tracker">
+        Weekly Tracker
+        </a>
+
+        <a class="btn mini danger" href="/manager/logout">
+        Logout
+        </a>
+
+    </div>
+    """
+
 
 # --- Admin: Analytics dashboard ---
 
