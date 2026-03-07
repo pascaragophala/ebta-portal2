@@ -267,6 +267,8 @@ def init_db():
     CREATE TABLE IF NOT EXISTS tutor_weekly_tracker(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tutor_id INTEGER NOT NULL,
+        manager_id INTEGER,
+
         subject TEXT,
         grade TEXT,
         session_date TEXT,
@@ -11774,10 +11776,11 @@ def tracker_save():
         students_attended,
         topic_covered,
         manager_comments,
+        manager_id,
         created_at
     )
 
-    VALUES(?,?,?,?,?,?,?,?,?,?)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)
 
     """,(
 
@@ -11790,6 +11793,7 @@ def tracker_save():
     request.form.get("students_attended"),
     request.form.get("topic_covered"),
     request.form.get("manager_comments"),
+    None,
     now_utc_iso()
 
     ))
@@ -12618,8 +12622,11 @@ def manager_edit_logged_session():
     <label>Students</label>
     <input type="number" name="students_attended" value="{s['students_attended'] or ''}">
 
-    <label>Recording</label>
-    <input name="recording_link" value="{s['recording_link'] or ''}">
+    <label>Recording Uploaded</label>
+    <select name="recording_link">
+    <option value="">No</option>
+    <option value="YES" {"selected" if s["recording_link"] else ""}>Yes</option>
+    </select>
 
     <label>Comments</label>
     <textarea name="manager_comments">{s['manager_comments'] or ''}</textarea>
