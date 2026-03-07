@@ -12470,9 +12470,212 @@ def manager_nav():
         <a class="btn mini danger" href="/manager/logout">
         Logout
         </a>
+        
+        <a class="btn mini" href="/manager/tracker/history">
+        Session History
+        </a>
 
     </div>
     """
+    
+@app.get('/manager/tracker/history')
+def manager_tracker_history():
+
+    r = require_manager()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    SELECT
+        tw.id,
+        tw.session_date,
+        tw.start_time,
+        tw.end_time,
+        tw.students_attended,
+        tw.recording_link,
+        t.full_name AS tutor
+
+    FROM tutor_weekly_tracker tw
+    JOIN tutors t ON tw.tutor_id = t.id
+    JOIN manager_tutors mt ON mt.tutor_id = t.id
+
+    WHERE mt.manager_id=?
+
+    ORDER BY tw.session_date DESC
+    """,(session["manager_id"],))
+
+    rows = cur.fetchall()
+    conn.close()
+
+    table_rows=""
+
+    for r in rows:
+
+        table_rows += f"""
+        <tr>
+        <td>{r['session_date']}</td>
+        <td>{r['tutor']}</td>
+        <td>{r['start_time'] or '-'}</td>
+        <td>{r['end_time'] or '-'}</td>
+        <td>{r['students_attended'] or '-'}</td>
+        <td>{'✓' if r['recording_link'] else '-'}</td>
+
+        <td>
+        <a class="btn mini"
+        href="/manager/tracker/edit-session?id={r['id']}">
+        Edit
+        </a>
+        </td>
+
+        </tr>
+        """
+
+    body=f"""
+
+    {manager_nav()}
+
+    <section class='card'>
+
+    <h1>Session History</h1>
+
+    <table>
+
+    <thead>
+    <tr>
+    <th>Date</th>
+    <th>Tutor</th>
+    <th>Start</th>
+    <th>End</th>
+    <th>Students</th>
+    <th>Recording</th>
+    <th>Edit</th>
+    </tr>
+    </thead>
+
+    <tbody>
+    {table_rows}
+    </tbody>
+
+    </table>
+
+    </section>
+    """
+
+    return page("Session History", body)
+    
+
+@app.get('/manager/tracker/edit-session')
+def manager_edit_logged_session():
+
+    r = require_manager()
+    if r:
+        return r
+
+    session_id = request.args.get("id")
+
+    conn=get_db()
+    cur=conn.cursor()
+
+    cur.execute("""
+    SELECT *
+    FROM tutor_weekly_tracker
+    WHERE id=? AND manager_id=?
+    """,(session_id, session["manager_id"]))
+
+    s = cur.fetchone()
+    conn.close()
+
+    if not s:
+        return page("Error","<section class='card'>Session not found</section>")
+
+    body=f"""
+
+    {manager_nav()}
+
+    <section class='card'>
+
+    <h1>Edit Session</h1>
+
+    <form method="post" action="/manager/tracker/update">
+
+    <input type="hidden" name="id" value="{s['id']}">
+
+    <label>Session Held</label>
+    <select name="session_held">
+    <option value="1" {"selected" if s["session_held"] else ""}>Yes</option>
+    <option value="0" {"selected" if not s["session_held"] else ""}>No</option>
+    </select>
+
+    <label>Start Time</label>
+    <input type="time" name="start_time" value="{s['start_time'] or ''}">
+
+    <label>End Time</label>
+    <input type="time" name="end_time" value="{s['end_time'] or ''}">
+
+    <label>Students</label>
+    <input type="number" name="students_attended" value="{s['students_attended'] or ''}">
+
+    <label>Recording</label>
+    <input name="recording_link" value="{s['recording_link'] or ''}">
+
+    <label>Comments</label>
+    <textarea name="manager_comments">{s['manager_comments'] or ''}</textarea>
+
+    <button class="btn success">
+    Update Session
+    </button>
+
+    </form>
+
+    </section>
+    """
+
+    return page("Edit Session", body)
+    
+    
+@app.post('/manager/tracker/update')
+def manager_update_session():
+
+    r = require_manager()
+    if r:
+        return r
+
+    conn=get_db()
+    cur=conn.cursor()
+
+    cur.execute("""
+    UPDATE tutor_weekly_tracker
+
+    SET
+        session_held=?,
+        start_time=?,
+        end_time=?,
+        students_attended=?,
+        recording_link=?,
+        manager_comments=?
+
+    WHERE id=? AND manager_id=?
+
+    """,(
+
+    request.form.get("session_held"),
+    request.form.get("start_time"),
+    request.form.get("end_time"),
+    request.form.get("students_attended"),
+    request.form.get("recording_link"),
+    request.form.get("manager_comments"),
+    request.form.get("id"),
+    session["manager_id"]
+
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/manager/tracker/history")
 
 
 # --- Admin: Analytics dashboard ---
