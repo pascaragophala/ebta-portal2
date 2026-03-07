@@ -11489,7 +11489,7 @@ def admin_tutor_tracker():
 
     # Load tutor managers
     cur.execute("""
-        SELECT full_name, phone, pin
+        SELECT id, full_name, phone, pin
         FROM tutor_managers
         ORDER BY full_name
     """)
@@ -11500,28 +11500,37 @@ def admin_tutor_tracker():
     for m in managers:
         manager_rows += f"""
         <tr>
-            <td>{m['full_name']}</td>
-            <td>{m['phone']}</td>
-            <td>{m['pin']}</td>
+        <td>{m['full_name']}</td>
+        <td>{m['phone']}</td>
+        <td>{m['pin']}</td>
 
-            <td style="display:flex;gap:6px">
+        <td style="display:flex;gap:6px">
 
-                <a class="btn mini"
-                href="/admin/managers/edit/{m['id']}">
-                Edit
-                </a>
+        <a class="btn mini"
+        href="/admin/managers/edit/{m['id']}">
+        Edit
+        </a>
 
-                <form method="post"
-                action="/admin/managers/delete/{m['id']}"
-                onsubmit="return confirm('Delete this manager?')">
+        <form method="post"
+        action="/admin/managers/reset-pin/{m['id']}">
 
-                    <button class="btn mini danger">
-                    Delete
-                    </button>
+        <button class="btn mini warn">
+        Reset PIN
+        </button>
 
-                </form>
+        </form>
 
-            </td>
+        <form method="post"
+        action="/admin/managers/delete/{m['id']}"
+        onsubmit="return confirm('Delete this manager?')">
+
+        <button class="btn mini danger">
+        Delete
+        </button>
+
+        </form>
+
+        </td>
         </tr>
         """
 
@@ -11843,66 +11852,74 @@ def manager_dashboard():
     cur = conn.cursor()
 
     cur.execute("""
-    SELECT t.id, t.full_name, s.name AS subject, s.grade
-    FROM tutors t
-    LEFT JOIN tutor_subjects ts ON ts.tutor_id = t.id
-    LEFT JOIN subjects s ON s.id = ts.subject_id
-    ORDER BY t.full_name
+    SELECT COUNT(*) AS total
+    FROM tutors
     """)
+    total_tutors = cur.fetchone()["total"]
 
-    tutors = cur.fetchall()
+    today = datetime.date.today()
+
+    week_start = today - datetime.timedelta(days=7)
+
+    cur.execute("""
+    SELECT COUNT(*) AS sessions
+    FROM tutor_weekly_tracker
+    WHERE session_date >= ?
+    """,(week_start.strftime("%Y-%m-%d"),))
+
+    weekly_updates = cur.fetchone()["sessions"]
+
     conn.close()
-
-    rows = ""
-
-    for t in tutors:
-
-        rows += f"""
-        <tr>
-            <td>{t['full_name']}</td>
-            <td>{t['subject'] or '-'}</td>
-            <td>{grade_label(t['grade']) if t['grade'] else '-'}</td>
-
-            <td>
-                <a class="btn mini"
-                href="{url_for('manager_tracker_edit', tutor_id=t['id'])}">
-                Update
-                </a>
-            </td>
-        </tr>
-        """
 
     body = f"""
 
     <section class='card'>
 
-        <h1>Weekly Tutor Tracker</h1>
+        <h1>Tutor Manager Dashboard</h1>
 
-        <div class='muted'>
-        Managers update tutor sessions here.
+        <p class='muted'>
+        Welcome {session.get('manager_name')}
+        </p>
+
+        <div class='stats'>
+
+            <div class='stat'>
+                <div class='k'>{total_tutors}</div>
+                <div class='t'>Tutors in system</div>
+            </div>
+
+            <div class='stat'>
+                <div class='k'>{weekly_updates}</div>
+                <div class='t'>Sessions logged this week</div>
+            </div>
+
         </div>
 
-        <table>
+        <br>
 
-        <thead>
-        <tr>
-        <th>Tutor</th>
-        <th>Subject</th>
-        <th>Grade</th>
-        <th>Action</th>
-        </tr>
-        </thead>
+        <div class='toolbar'>
 
-        <tbody>
-        {rows}
-        </tbody>
+            <a class='btn success'
+            href="/manager/tracker">
 
-        </table>
+            Open Weekly Tutor Tracker
+
+            </a>
+
+        </div>
+
+        <div class='muted'>
+
+        Use the tracker to record whether sessions were held,
+        upload recording links and capture tutor activity.
+
+        </div>
 
     </section>
+
     """
 
-    return page("Tutor Tracker", body)
+    return page("Manager Dashboard", body)
 
 
 @app.post('/admin/managers/add')
@@ -12019,6 +12036,42 @@ def admin_delete_manager(manager_id):
     DELETE FROM tutor_managers
     WHERE id=?
     """,(manager_id,))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("admin_tutor_tracker"))
+
+
+@app.post('/admin/managers/reset-pin/<int:manager_id>')
+@require_high_admin
+def admin_reset_manager_pin(manager_id):
+
+    r = require_admin()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    pins = set()
+
+    cur.execute("SELECT pin FROM students WHERE pin IS NOT NULL")
+    pins |= {r['pin'] for r in cur.fetchall()}
+
+    cur.execute("SELECT pin FROM tutors WHERE pin IS NOT NULL")
+    pins |= {r['pin'] for r in cur.fetchall()}
+
+    cur.execute("SELECT pin FROM tutor_managers WHERE pin IS NOT NULL")
+    pins |= {r['pin'] for r in cur.fetchall()}
+
+    new_pin = gen_pin(pins)
+
+    cur.execute("""
+    UPDATE tutor_managers
+    SET pin=?
+    WHERE id=?
+    """,(new_pin,manager_id))
 
     conn.commit()
     conn.close()
