@@ -11820,36 +11820,24 @@ def manager_tracker():
 
     tutors = cur.fetchall()
 
-    today = datetime.date.today()
-
-    dates = [today - datetime.timedelta(days=i) for i in range(7)]
-
-    header = "<th>Date</th>"
-
-    for t in tutors:
-        header += f"<th>{t['full_name']}</th>"
-
-    rows=""
-
-    for d in dates:
-
-        date_str = d.strftime("%Y-%m-%d")
-        row=f"<td>{date_str}</td>"
-
-        for t in tutors:
-
-            row+=f"""
-            <td>
-            <a class="btn mini"
-            href="/manager/tracker/edit?tutor_id={t['id']}&date={date_str}">
-            Update
-            </a>
-            </td>
-            """
-
-        rows+=f"<tr>{row}</tr>"
-
     conn.close()
+
+    rows = ""
+
+    for i, t in enumerate(tutors, start=1):
+
+        rows += f"""
+        <tr>
+        <td>{i}</td>
+        <td>{t['full_name']}</td>
+        <td>
+        <a class="btn mini success"
+        href="/manager/tracker/edit?tutor_id={t['id']}">
+        Log Session
+        </a>
+        </td>
+        </tr>
+        """
 
     body=f"""
 
@@ -11857,16 +11845,22 @@ def manager_tracker():
 
     <section class='card'>
 
-    <h1>Weekly Tutor Tracker</h1>
+    <h1>Tutor Session Tracker</h1>
 
-    <p class='muted'>Logged in as {session.get('manager_name')}</p>
+    <p class='muted'>
+    Logged in as {session.get('manager_name')}
+    </p>
 
     <div class='scroll-x'>
 
     <table>
 
     <thead>
-    <tr>{header}</tr>
+    <tr>
+    <th>#</th>
+    <th>Tutor</th>
+    <th>Action</th>
+    </tr>
     </thead>
 
     <tbody>
@@ -11880,7 +11874,7 @@ def manager_tracker():
     </section>
     """
 
-    return page("Tutor Tracker",body)
+    return page("Tutor Tracker",body)   
     
     
 @app.route('/manager/login', methods=['GET','POST'])
@@ -12027,13 +12021,26 @@ def manager_tracker_edit():
         return r
 
     tutor_id = request.args.get("tutor_id")
-    date = request.args.get("date")
+    date = datetime.date.today().strftime("%Y-%m-%d")
 
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT full_name FROM tutors WHERE id=?", (tutor_id,))
+    cur.execute("""
+    SELECT t.full_name
+    FROM tutors t
+    JOIN manager_tutors mt ON mt.tutor_id = t.id
+    WHERE t.id=? AND mt.manager_id=?
+    """,(tutor_id, session["manager_id"]))
+
     tutor = cur.fetchone()
+
+    if not tutor:
+        conn.close()
+        return page(
+            "Access denied",
+            "<section class='card'><h1>Unauthorized tutor</h1></section>"
+        )
 
     conn.close()
 
