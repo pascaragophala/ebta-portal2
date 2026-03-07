@@ -6988,7 +6988,6 @@ def admin_nav():
     links.append(f"<a class='btn secondary' href='{url_for('admin_students')}'>Students</a>")
     links.append(f"<a class='btn secondary' href='{url_for('admin_followups')}'>Follow-Ups</a>")
     links.append(f"<a class='btn secondary' href='{url_for('admin_direct_messages')}'>Direct Msgs</a>")
-    links.append(f"<a class='btn secondary' href='{url_for('admin_tutor_tracker')}'>Tutor Tracker</a>")
 
     # Only HIGH admin can see these
     if is_high_admin():
@@ -7001,7 +7000,7 @@ def admin_nav():
             f"<a class='btn secondary' href='{url_for('admin_settings')}'>Settings</a>",
             f"<a class='btn secondary' href='{url_for('admin_uploads_control')}'>Uploads Control</a>",
             f"<a class='btn secondary' href='{url_for('admin_materials')}'>Unlock Uploads</a>",
-            
+            f"<a class='btn secondary' href='{url_for('admin_tutor_tracker')}'>Tutor Tracker</a>",
             f"<a class='btn secondary' href='{url_for('admin_sms_dashboard')}'>SMS Dashboard</a>",
             f"<a class='btn secondary' href='{url_for('admin_process_sms')}'>Processed SMS</a>",
         ])
@@ -11426,6 +11425,7 @@ def export_followups():
 
 
 @app.get('/admin/tutor-tracker')
+@require_high_admin
 def admin_tutor_tracker():
 
     r = require_admin()
@@ -11437,9 +11437,9 @@ def admin_tutor_tracker():
 
     # Load tutors dynamically
     cur.execute("""
-    SELECT id, full_name
-    FROM tutors
-    ORDER BY full_name
+        SELECT id, full_name
+        FROM tutors
+        ORDER BY full_name
     """)
     tutors = cur.fetchall()
 
@@ -11459,62 +11459,122 @@ def admin_tutor_tracker():
 
     for d in dates:
 
-        row = f"<td>{d}</td>"
+        date_str = d.strftime("%Y-%m-%d")
+        row = f"<td>{date_str}</td>"
 
         for t in tutors:
 
             cur.execute("""
-            SELECT session_held
-            FROM tutor_weekly_tracker
-            WHERE tutor_id=? AND session_date=?
-            """,(t["id"],str(d)))
+                SELECT session_held
+                FROM tutor_weekly_tracker
+                WHERE tutor_id=? AND session_date=?
+            """, (t["id"], date_str))
 
             entry = cur.fetchone()
 
-            color=""
+            color = ""
 
             if entry and entry["session_held"] == 0:
-                color="style='background:#fee2e2'"
+                color = "style='background:#fee2e2'"
 
-            row+=f"""
+            row += f"""
             <td {color}>
-            <a href="/admin/tutor-tracker/edit?tutor_id={t['id']}&date={d}">
-            Update
-            </a>
+                <a href="/admin/tutor-tracker/edit?tutor_id={t['id']}&date={date_str}">
+                Update
+                </a>
             </td>
             """
 
-        rows+=f"<tr>{row}</tr>"
+        rows += f"<tr>{row}</tr>"
+
+    # Load tutor managers
+    cur.execute("""
+        SELECT full_name, phone, pin
+        FROM tutor_managers
+        ORDER BY full_name
+    """)
+    managers = cur.fetchall()
+
+    manager_rows = ""
+
+    for m in managers:
+        manager_rows += f"""
+        <tr>
+            <td>{m['full_name']}</td>
+            <td>{m['phone']}</td>
+            <td>{m['pin']}</td>
+        </tr>
+        """
 
     conn.close()
 
-    body=f"""
+    body = f"""
     {admin_nav()}
 
     <section class='card'>
 
-    <h1>Tutor Weekly Tracker</h1>
+        <h1>Tutor Weekly Tracker</h1>
 
-    <div class='scroll-x'>
+        <div class='scroll-x'>
 
-    <table>
+            <table>
 
-    <thead>
-    <tr>{header}</tr>
-    </thead>
+                <thead>
+                    <tr>{header}</tr>
+                </thead>
 
-    <tbody>
-    {rows}
-    </tbody>
+                <tbody>
+                    {rows}
+                </tbody>
 
-    </table>
+            </table>
 
-    </div>
+        </div>
+
+    </section>
+
+    <section class='card'>
+
+        <h1>Tutor Managers</h1>
+
+        <form method="post" action="/admin/managers/add">
+
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px">
+
+                <input name="name" placeholder="Manager Name" required>
+
+                <input name="phone" placeholder="Phone Number" required>
+
+                <button class="btn">Create Manager</button>
+
+            </div>
+
+        </form>
+
+        <br>
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>PIN</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {manager_rows}
+            </tbody>
+
+        </table>
 
     </section>
     """
 
-    return page("Tutor Tracker",body)
+    return page("Tutor Tracker", body)
+
+
     
 @app.get('/admin/tutor-tracker/edit')
 def tracker_edit():
@@ -11619,56 +11679,7 @@ def tracker_save():
 
     return redirect("/admin/tutor-tracker")
 
-
-@app.route('/manager/login', methods=['GET','POST'])
-def manager_login():
-
-    if request.method == "POST":
-
-        phone = request.form.get("phone")
-        pin = request.form.get("pin")
-
-        conn = get_db()
-        cur = conn.cursor()
-
-        cur.execute("""
-        SELECT * FROM tutor_managers
-        WHERE phone=? AND pin=?
-        """,(phone,pin))
-
-        row = cur.fetchone()
-        conn.close()
-
-        if row:
-
-            session.clear()
-            session["manager_id"] = row["id"]
-            session["manager_name"] = row["full_name"]
-
-            return redirect("/manager/tracker")
-
-    body = f"""
-    <section class='card auth-card'>
-
-    <h1>Tutor Manager Login</h1>
-
-    <form method="post">
-
-    <label>Phone</label>
-    <input name="phone" required>
-
-    <label>PIN</label>
-    <input name="pin" required>
-
-    <button class="btn success">Login</button>
-
-    </form>
-
-    </section>
-    """
-
-    return page("Manager Login", body)
-    
+  
 @app.get('/manager/tracker')
 def manager_tracker():
 
@@ -11750,6 +11761,7 @@ def manager_tracker():
 
 
 @app.post('/admin/managers/add')
+@require_high_admin
 def admin_add_manager():
 
     r=require_admin()
@@ -11771,6 +11783,170 @@ def admin_add_manager():
     conn.close()
 
     return redirect("/admin")
+    
+    
+@app.route('/manager/login', methods=['GET','POST'])
+def manager_login():
+
+    if request.method == 'POST':
+
+        phone = request.form.get("phone")
+        pin = request.form.get("pin")
+
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("""
+        SELECT * FROM tutor_managers
+        WHERE phone=? AND pin=?
+        """,(phone,pin))
+
+        manager = cur.fetchone()
+        conn.close()
+
+        if manager:
+            session.clear()
+            session["manager_id"] = manager["id"]
+            session["manager_name"] = manager["full_name"]
+            return redirect(url_for("manager_dashboard"))
+
+        return page("Login failed", card_msg("Invalid login details."))
+
+
+    body = f"""
+    <section class='card auth-card'>
+        <h1>Tutor Manager Login</h1>
+
+        <form method="post" class="grid">
+
+            <div>
+                <label>Phone</label>
+                <input name="phone" required>
+            </div>
+
+            <div>
+                <label>PIN</label>
+                <input name="pin" required>
+            </div>
+
+            <button class="btn">Login</button>
+
+        </form>
+    </section>
+    """
+
+    return page("Manager Login", body)
+    
+@app.get('/manager/dashboard')
+def manager_dashboard():
+
+    r = require_manager()
+    if r:
+        return r
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    SELECT t.id, t.full_name, s.name AS subject, s.grade
+    FROM tutors t
+    LEFT JOIN tutor_subjects ts ON ts.tutor_id = t.id
+    LEFT JOIN subjects s ON s.id = ts.subject_id
+    ORDER BY t.full_name
+    """)
+
+    tutors = cur.fetchall()
+    conn.close()
+
+    rows = ""
+
+    for t in tutors:
+
+        rows += f"""
+        <tr>
+            <td>{t['full_name']}</td>
+            <td>{t['subject'] or '-'}</td>
+            <td>{grade_label(t['grade']) if t['grade'] else '-'}</td>
+
+            <td>
+                <a class="btn mini"
+                href="{url_for('manager_tracker_edit', tutor_id=t['id'])}">
+                Update
+                </a>
+            </td>
+        </tr>
+        """
+
+    body = f"""
+
+    <section class='card'>
+
+        <h1>Weekly Tutor Tracker</h1>
+
+        <div class='muted'>
+        Managers update tutor sessions here.
+        </div>
+
+        <table>
+
+        <thead>
+        <tr>
+        <th>Tutor</th>
+        <th>Subject</th>
+        <th>Grade</th>
+        <th>Action</th>
+        </tr>
+        </thead>
+
+        <tbody>
+        {rows}
+        </tbody>
+
+        </table>
+
+    </section>
+    """
+
+    return page("Tutor Tracker", body)
+
+
+@app.post('/admin/managers/add')
+@require_high_admin
+def admin_manager_add():
+
+    r = require_admin()
+    if r:
+        return r
+
+    name = request.form.get("name")
+    phone = request.form.get("phone")
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    pins = set()
+
+    cur.execute("SELECT pin FROM students WHERE pin IS NOT NULL")
+    pins |= {r['pin'] for r in cur.fetchall()}
+
+    cur.execute("SELECT pin FROM tutors WHERE pin IS NOT NULL")
+    pins |= {r['pin'] for r in cur.fetchall()}
+
+    cur.execute("SELECT pin FROM tutor_managers WHERE pin IS NOT NULL")
+    pins |= {r['pin'] for r in cur.fetchall()}
+
+    pin = gen_pin(pins)
+
+    cur.execute("""
+    INSERT INTO tutor_managers(full_name, phone, pin, created_at)
+    VALUES(?,?,?,?)
+    """,(name,phone,pin,now_utc_iso()))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("admin_tutor_tracker"))
+
 
 # --- Admin: Analytics dashboard ---
 
