@@ -291,7 +291,9 @@ def init_db():
         manager_comments TEXT,
         cao_review_status TEXT,
 
-        created_at TEXT
+        created_at TEXT,
+        
+        manager_rating INTEGER
     );
     """)
     
@@ -335,6 +337,7 @@ def init_db():
     ensure_column(conn, "followups", "updated_by", "TEXT")
     ensure_column(conn, "followups", "updated_at", "TEXT")
     ensure_column(conn, "tutor_weekly_tracker", "manager_id", "INTEGER")
+    ensure_column(conn, "tutor_weekly_tracker", "manager_rating", "INTEGER")
 
 
 
@@ -1802,6 +1805,48 @@ background:#fff;
     padding: 2px 6px;
     border-radius: 6px;
 }
+
+.student-nav{
+display:flex;
+gap:8px;
+overflow-x:auto;
+padding:10px;
+background:white;
+border-bottom:1px solid #eee;
+position:sticky;
+top:60px;
+z-index:10;
+}
+
+.student-nav a{
+padding:8px 12px;
+background:#f1f5f9;
+border-radius:10px;
+text-decoration:none;
+font-size:13px;
+white-space:nowrap;
+}
+
+.subject-toggle{
+width:100%;
+text-align:left;
+background:#f8fafc;
+border:1px solid #e2e8f0;
+padding:10px;
+border-radius:10px;
+font-weight:600;
+cursor:pointer;
+}
+
+.subject-content{
+display:none;
+margin-top:10px;
+}
+
+.subject-content.open{
+display:block;
+}
+
 </style>
 """
 
@@ -2174,6 +2219,21 @@ headers:{
 },
 body:`manager_id=${manager}&tutor_id=${tutor}&state=${state?1:0}`
 })
+
+}
+
+function toggleSubject(id){
+
+const el = document.getElementById(id)
+
+if(el.classList.contains("open"))
+{
+el.classList.remove("open")
+}
+else
+{
+el.classList.add("open")
+}
 
 }
 
@@ -4414,14 +4474,14 @@ def student_home():
     if active_sub_ids:
 
         cur.execute(f"""
-            SELECT m.*, sub.name AS subject_name, sub.grade, t.full_name AS tutor_name
-            FROM materials m
-            JOIN subjects sub ON sub.id=m.subject_id
-            JOIN tutors t ON t.id=m.tutor_id
-            WHERE m.subject_id IN ({','.join('?'*len(active_sub_ids))})
-              AND m.month LIKE ?
-            ORDER BY sub.grade, sub.name, m.created_at DESC
-        """, (*active_sub_ids, month + "%"))
+        SELECT m.*, sub.name AS subject_name, sub.grade, t.full_name AS tutor_name
+        FROM materials m
+        JOIN subjects sub ON sub.id=m.subject_id
+        JOIN tutors t ON t.id=m.tutor_id
+        WHERE m.subject_id IN ({','.join('?'*len(active_sub_ids))})
+          AND substr(m.month,1,7) = ?
+        ORDER BY sub.grade, sub.name, m.created_at DESC
+        """, (*active_sub_ids, month))
 
         mats = cur.fetchall()
         
@@ -4484,10 +4544,19 @@ def student_home():
 
             for subject, content in grouped.items():
 
-                subject_block = f"""
-                <div class='card soft' style="margin-bottom:16px">
+                subject_id = subject.replace(" ", "_")
 
-                    <h3 style="margin-bottom:10px">{subject}</h3>
+                subject_block = f"""
+                <div class="card soft subject-card" style="margin-bottom:16px">
+
+                <button class="subject-toggle"
+                onclick="toggleSubject('{subject_id}')">
+
+                {subject}
+
+                </button>
+
+                <div id="{subject_id}" class="subject-content">
                 """
 
                 if content["assignments"]:
@@ -4560,7 +4629,7 @@ def student_home():
                     </div>
                     """
 
-                subject_block += "</div>"
+                subject_block += "</div></div>"
 
                 blocks.append(subject_block)
 
@@ -4961,64 +5030,165 @@ def student_home():
         </div>
         """
     
-    body=fr"""
-    <section class='grid'>
-    <div class='card'>
-        <h1>Welcome, {session.get('student_name','Student')}</h1>
-            <p class='muted' style="margin-bottom:6px">
-                Currently viewing: <b>{pretty_month_label(month)}</b>
-            </p>
+    student_nav = """
+    <div class="student-nav">
 
-            {month_selector}
+    <a href="#dashboard">Dashboard</a>
+    <a href="#subjects">Subjects</a>
+    <a href="#sessions">Sessions</a>
+    <a href="#materials">Materials</a>
+    <a href="#assignments">Assignments</a>
+    <a href="/student/messages">Messages</a>
+    <a href="#results">Results</a>
 
-        <h2>Your Enrollments</h2>
-        {enr_html}
-        {enroll_cta}
-
-        <p class='mini muted'>To add more subjects, submit the Home form again with your phone number and the new subjects + PoP.</p>
     </div>
-    <div class='card soft' style="border-left:5px solid #25D366;">
-        <h2>EBTA Notifications Groups</h2>
+    """
+    
+    body = fr"""
+    {student_nav}
 
-        <p class="mini muted" style="margin-bottom:12px;">
-            Join these official EBTA WhatsApp groups to receive important announcements and updates.
-        </p>
+    <section class="grid">
 
-        <div class="grid" style="gap:10px">
+    <!-- DASHBOARD -->
+    <div class="card" id="dashboard">
+    <h1>Welcome, {session.get('student_name','Student')}</h1>
 
-            <a class="btn success"
-               target="_blank"
-               href="https://chat.whatsapp.com/HfmZyzcU9bMDB3N1DAuFrJ"
-               style="display:block;text-align:center">
+    <p class="muted">
+    Currently viewing: <b>{pretty_month_label(month)}</b>
+    </p>
 
-                EBTA Learners Notifications
+    {month_selector}
 
-            </a>
+    <h2>Your Enrollments</h2>
+    {enr_html}
 
-            <a class="btn secondary"
-               target="_blank"
-               href="https://chat.whatsapp.com/DZYMvnEl9jpEyvzxqbgwV6"
-               style="display:block;text-align:center">
+    {enroll_cta}
 
-                EBTA Parents Notifications
+    </div>
 
-            </a>
+
+    <!-- SUBJECT GROUPS -->
+    <div class="card" id="subjects">
+    <h2>Subject WhatsApp Groups</h2>
+    {group_html}
+    </div>
+
+
+    <!-- SESSIONS -->
+    <div class="card" id="sessions">
+    <h2>Sessions</h2>
+    {sessions_html}
+    </div>
+
+
+    <!-- MATERIALS -->
+    <div class="card" id="materials">
+    <h2>Materials & Recordings</h2>
+    {materials_html}
+    </div>
+
+
+    <!-- ASSIGNMENTS -->
+    <div class="card" id="assignments">
+    <h2>Assignments</h2>
+    {(''.join(submit_blocks)) if submit_blocks else "<div class='empty'>No assignments yet</div>"}
+    </div>
+
+
+    <!-- RESULTS -->
+    <div class="card" id="results">
+    <h2>Feedback & Results</h2>
+    {feedback_card}
+    </div>
+
+    {rate_card}
+
+    </section>
+    """
+    return page("Student Portal", body)
+    
+@app.get("/student/messages")
+def student_messages():
+
+    r = require_student()
+    if r: 
+        return r
+
+    sid = is_student()
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    SELECT DISTINCT
+        dm.subject_id,
+        t.id AS tutor_id,
+        t.full_name AS tutor_name,
+        s.name AS subject_name
+    FROM direct_messages dm
+    JOIN tutors t ON t.id =
+        CASE
+            WHEN dm.from_role='tutor' THEN dm.from_id
+            ELSE dm.to_id
+        END
+    JOIN subjects s ON s.id = dm.subject_id
+    WHERE
+        (dm.from_role='student' AND dm.from_id=?)
+        OR
+        (dm.to_role='student' AND dm.to_id=?)
+    """,(sid,sid))
+
+    rows = cur.fetchall()
+
+    conversations=""
+
+    for r in rows:
+
+        conversations+=f"""
+        <div class="chat-user"
+        onclick="loadChat({r['tutor_id']},{r['subject_id']})">
+
+        <div class="chat-name">{r['tutor_name']}</div>
+
+        <div class="chat-role">{r['subject_name']}</div>
 
         </div>
+        """
+
+    html=f"""
+    <div class="card">
+    <h1>Messages</h1>
+
+    <div class="chat-layout">
+
+    <div class="chat-list">
+    {conversations}
+    </div>
+
+    <div class="chat-window">
+
+    <div id="chatMessages" class="chat-messages">
+    <div class="empty">Select a conversation</div>
+    </div>
+
+    <form method="post" action="/student/message" class="chat-input">
+
+    <input type="hidden" name="combo" id="chatCombo">
+
+    <input name="body" placeholder="Type message..." required>
+
+    <button class="btn success">Send</button>
+
+    </form>
 
     </div>
-    
-    {groups_section}
-    {sessions_section}
 
-    <div class='card'><h2>Materials & Assignments</h2><div class='scroll-x'>{materials_html}</div></div>
-{(''.join(submit_blocks)) if submit_blocks else ''}
+    </div>
 
-    {feedback_card}
-    {rate_card}
-    {compose_block}
-    </section>"""
-    return page("Student Portal", body)
+    </div>
+    """
+
+    return page("Messages",html)
 
 
 @app.post('/student/set-month')
@@ -8323,7 +8493,15 @@ def admin_tutors():
         return r
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, full_name, phone, pin FROM tutors ORDER BY created_at DESC")
+    cur.execute("""
+    SELECT t.id, t.full_name, t.phone, t.pin,
+           MIN(CAST(SUBSTR(s.grade,2) AS INTEGER)) AS grade_order
+    FROM tutors t
+    LEFT JOIN tutor_subjects ts ON ts.tutor_id = t.id
+    LEFT JOIN subjects s ON s.id = ts.subject_id
+    GROUP BY t.id
+    ORDER BY grade_order ASC, t.full_name
+    """)
     rows = cur.fetchall()
     # subjects list for mapping
     cur.execute("SELECT id,name,grade FROM subjects ORDER BY grade,name")
@@ -11086,6 +11264,12 @@ def admin_followups():
         "PoP Issues",
         "Other"
     ]
+    
+    FOLLOWUP_ROLES = [
+        "Admin",
+        "Admission COD",
+        "Leadership"
+    ]
 
     # get subjects for dropdown
     cur.execute("SELECT DISTINCT name FROM subjects ORDER BY name")
@@ -11188,8 +11372,22 @@ def admin_followups():
                 </select>
             </td>
             
-            <td><span class="badge">{escape(row['captured_by'] or '')}</span></td>
-            <td><span class="badge">{escape(row['updated_by'] or '')}</span></td>
+            <td>
+            <select name="captured_by">
+            <option value="Admin" {'selected' if row['captured_by']=="Admin" else ""}>Admin</option>
+            <option value="Admission COD" {'selected' if row['captured_by']=="Admission COD" else ""}>Admission COD</option>
+            <option value="Leadership" {'selected' if row['captured_by']=="Leadership" else ""}>Leadership</option>
+            </select>
+            </td>
+            
+            <td>
+            <select name="updated_by">
+            <option value="">Select</option>
+            <option value="Admin" {'selected' if row['updated_by']=="Admin" else ""}>Admin</option>
+            <option value="Admission COD" {'selected' if row['updated_by']=="Admission COD" else ""}>Admission COD</option>
+            <option value="Leadership" {'selected' if row['updated_by']=="Leadership" else ""}>Leadership</option>
+            </select>
+            </td>
 
             <td><input type="date" name="payment_date" value="{row['payment_date'] or ''}"></td>
             <td><input type="date" name="date_communicated" value="{row['date_communicated'] or ''}"></td>
@@ -11261,6 +11459,12 @@ def admin_followup_add():
         "Other"
     ]
 
+    FOLLOWUP_ROLES = [
+        "Admin",
+        "Admission COD",
+        "Leadership"
+    ]
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT DISTINCT name FROM subjects ORDER BY name")
@@ -11272,13 +11476,20 @@ def admin_followup_add():
         for s in subjects
     )
 
+    role_options = "".join(
+        f"<option value='{r}'>{r}</option>"
+        for r in FOLLOWUP_ROLES
+    )
+
     body = f"""
     {admin_nav()}
     <section class='card'>
         <h1>Add Follow-Up</h1>
 
         <form method="post" action="{url_for('admin_followup_create')}" class="grid" style="gap:10px">
+
             <input name="full_name" placeholder="Full name" required>
+
             <input name="phone" placeholder="Phone">
 
             <select name="grade">
@@ -11303,18 +11514,20 @@ def admin_followup_add():
 
             <select name="captured_by" required>
                 <option value="">Captured By</option>
-                <option value="Admin">Admin</option>
-                <option value="Admission COD">Admission COD</option>
+                {role_options}
             </select>
 
             <input type="date" name="payment_date">
             <input type="date" name="date_communicated">
+
             <textarea name="notes" placeholder="Notes"></textarea>
 
             <button class="btn success">Save</button>
+
         </form>
     </section>
     """
+
     return page("Add Followup", body)
     
 @app.post('/admin/followups/create')
@@ -11362,13 +11575,15 @@ def admin_followup_create():
     
 @app.post('/admin/followups/update/<int:fid>')
 def admin_followup_update(fid):
+
     r = require_admin()
-    if r: return r
+    if r:
+        return r
 
     conn = get_db()
     cur = conn.cursor()
 
-    admin_role = session.get("admin_role", "Admin")
+    updated_by = request.form.get("updated_by") or "Admin"
 
     cur.execute("""
     UPDATE followups SET
@@ -11381,6 +11596,7 @@ def admin_followup_update(fid):
         payment_date=?,
         date_communicated=?,
         notes=?,
+        captured_by=?,
         updated_by=?,
         updated_at=?
     WHERE id=?
@@ -11394,7 +11610,8 @@ def admin_followup_update(fid):
         request.form.get("payment_date"),
         request.form.get("date_communicated"),
         request.form.get("notes"),
-        admin_role,
+        request.form.get("captured_by"),
+        updated_by,
         now_utc_iso(),
         fid
     ))
@@ -12117,7 +12334,17 @@ def manager_tracker_edit():
     <textarea name="manager_comments"></textarea>
 
     <br>
-
+    
+    <label>Manager Rating (1–5)</label>
+    <select name="manager_rating">
+    <option value="">Not rated</option>
+    <option value="1">1</option>
+    <option value="2">2</option>
+    <option value="3">3</option>
+    <option value="4">4</option>
+    <option value="5">5</option>
+    </select>
+    
     <button class="btn success">
     Save Session
     </button>
@@ -12152,9 +12379,10 @@ def manager_tracker_save():
         topic_covered,
         manager_comments,
         manager_id,
+        manager_rating,
         created_at
     )
-    VALUES(?,?,?,?,?,?,?,?,?,?,?)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
     """,(
 
     request.form.get("tutor_id"),
@@ -12167,6 +12395,7 @@ def manager_tracker_save():
     request.form.get("topic_covered"),
     request.form.get("manager_comments"),
     session.get("manager_id"),
+    request.form.get("manager_rating"),
     now_utc_iso()
 
     ))
@@ -12371,47 +12600,205 @@ def admin_tutor_operations():
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("""
-    SELECT
-        tw.session_date,
-        t.full_name AS tutor,
-        tm.full_name AS manager,
-        tw.session_held,
-        tw.students_attended,
-        tw.recording_link
+    # ---------------- monitoring window ----------------
+    today = datetime.date.today()
+    weekday = today.weekday()
 
-    FROM tutor_weekly_tracker tw
+    monitor_window = weekday in [0,1,2,3]  # Monday–Thursday
 
-    LEFT JOIN tutors t
+    last_sunday = today - datetime.timedelta(days=weekday + 1)
+    last_saturday = last_sunday - datetime.timedelta(days=1)
+    last_friday = last_sunday - datetime.timedelta(days=2)
+
+    weekend_dates = [
+        last_friday.strftime("%Y-%m-%d"),
+        last_saturday.strftime("%Y-%m-%d"),
+        last_sunday.strftime("%Y-%m-%d")
+    ]
+
+    # ---------------- pagination ----------------
+    page_num = int(request.args.get("page", 1))
+    per_page = 30
+    offset = (page_num - 1) * per_page
+
+    # ---------------- filters ----------------
+    search = request.args.get("search", "")
+    manager = request.args.get("manager", "")
+    grade = request.args.get("grade", "")
+    subject = request.args.get("subject", "")
+    status = request.args.get("status", "")
+
+    conditions = []
+    params = []
+
+    if search:
+        conditions.append("t.full_name LIKE ?")
+        params.append(f"%{search}%")
+
+    if manager:
+        conditions.append("tm.id=?")
+        params.append(manager)
+
+    if grade:
+        conditions.append("s.grade=?")
+        params.append(grade)
+
+    if subject:
+        conditions.append("s.name=?")
+        params.append(subject)
+
+    where_clause = ""
+    if conditions:
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+    # ---------------- load data ----------------
+    cur.execute(f"""
+        SELECT
+            t.id as tutor_id,
+            t.full_name AS tutor,
+            tm.full_name AS manager,
+            s.grade,
+            s.name AS subject,
+            tw.session_date,
+            tw.session_held,
+            tw.students_attended,
+            tw.recording_link,
+            tw.manager_rating
+
+        FROM tutors t
+
+        LEFT JOIN manager_tutors mt
+        ON mt.tutor_id = t.id
+
+        LEFT JOIN tutor_managers tm
+        ON tm.id = mt.manager_id
+
+        LEFT JOIN tutor_subjects ts
+        ON ts.tutor_id = t.id
+
+        LEFT JOIN subjects s
+        ON s.id = ts.subject_id
+
+        LEFT JOIN tutor_weekly_tracker tw
         ON tw.tutor_id = t.id
+        AND tw.session_date IN (?,?,?)
 
-    LEFT JOIN tutor_managers tm
-        ON tw.manager_id = tm.id
+        {where_clause}
 
-    ORDER BY tw.session_date DESC
-    """)
+        ORDER BY t.full_name
+    """, weekend_dates + params)
 
     rows = cur.fetchall()
     conn.close()
 
+    # ---------------- apply status filter ----------------
+    filtered_rows = []
+
+    for r in rows:
+
+        is_not_logged = monitor_window and not r["session_date"]
+        is_missed_session = r["session_held"] == 0
+        is_missing_recording = r["session_held"] == 1 and not r["recording_link"]
+
+        if status == "not_logged" and not is_not_logged:
+            continue
+
+        if status == "no_session" and not is_missed_session:
+            continue
+
+        if status == "no_recording" and not is_missing_recording:
+            continue
+
+        filtered_rows.append(r)
+
+    # pagination after filtering
+    total = len(filtered_rows)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    rows = filtered_rows[offset:offset + per_page]
+
+    # ---------------- build table ----------------
     table_rows = ""
 
     for r in rows:
 
-        status = "✓" if r["session_held"] else "✕"
+        row_style = ""
 
-        recording = "✓" if r["recording_link"] else "—"
+        is_not_logged = monitor_window and not r["session_date"]
+        is_missed_session = r["session_held"] == 0
+        is_missing_recording = r["session_held"] == 1 and not r["recording_link"]
+
+        if is_not_logged:
+            row_style = "style='background:#fde047'"
+
+        elif is_missed_session:
+            row_style = "style='background:#fca5a5'"
+
+        elif is_missing_recording:
+            row_style = "style='background:#fdba74'"
+
+        session_status = "-"
+        if r["session_held"] == 1:
+            session_status = "✓"
+        elif r["session_held"] == 0:
+            session_status = "✕"
+
+        recording = "✓" if r["recording_link"] else "-"
+
+        rating = "-"
+        if r["manager_rating"]:
+            rating = f"{r['manager_rating']}/5"
 
         table_rows += f"""
-        <tr>
-        <td>{r['session_date']}</td>
+        <tr {row_style}>
+        <td>{r['session_date'] or 'Not Logged'}</td>
         <td>{r['tutor']}</td>
         <td>{r['manager'] or 'Unassigned'}</td>
-        <td>{status}</td>
+        <td>{r['grade'] or '-'}</td>
+        <td>{r['subject'] or '-'}</td>
+        <td>{session_status}</td>
         <td>{r['students_attended'] or '-'}</td>
         <td>{recording}</td>
+        <td>{rating}</td>
         </tr>
         """
+
+    # ---------------- pagination ----------------
+    pagination = "<div class='toolbar'>"
+
+    for p in range(1, total_pages + 1):
+        pagination += f"<a class='btn mini' href='?page={p}&status={status}&search={search}'>{p}</a>"
+
+    pagination += "</div>"
+
+    # ---------------- filter UI ----------------
+    filter_bar = f"""
+    <form method="get" class="toolbar">
+
+    <input name="search" placeholder="Search tutor" value="{search}">
+
+    <select name="status">
+
+    <option value="">All</option>
+
+    <option value="not_logged" {"selected" if status=="not_logged" else ""}>
+    Not Logged
+    </option>
+
+    <option value="no_session" {"selected" if status=="no_session" else ""}>
+    Missed Sessions
+    </option>
+
+    <option value="no_recording" {"selected" if status=="no_recording" else ""}>
+    Missing Recordings
+    </option>
+
+    </select>
+
+    <button class="btn mini">Apply Filter</button>
+
+    </form>
+    """
 
     body = f"""
 
@@ -12420,6 +12807,12 @@ def admin_tutor_operations():
     <section class='card'>
 
     <h1>Tutor Operations Dashboard</h1>
+
+    <p class='muted'>
+    Yellow rows indicate tutors whose weekend sessions were not logged by their manager.
+    </p>
+
+    {filter_bar}
 
     <div class="scroll-x">
 
@@ -12430,9 +12823,12 @@ def admin_tutor_operations():
     <th>Date</th>
     <th>Tutor</th>
     <th>Manager</th>
-    <th>Session Held</th>
+    <th>Grade</th>
+    <th>Subject</th>
+    <th>Session</th>
     <th>Students</th>
     <th>Recording</th>
+    <th>Rating</th>
     </tr>
     </thead>
 
@@ -12443,6 +12839,8 @@ def admin_tutor_operations():
     </table>
 
     </div>
+
+    {pagination}
 
     </section>
     """
@@ -12580,8 +12978,8 @@ def manager_edit_logged_session():
 
     session_id = request.args.get("id")
 
-    conn=get_db()
-    cur=conn.cursor()
+    conn = get_db()
+    cur = conn.cursor()
 
     cur.execute("""
     SELECT *
@@ -12606,6 +13004,9 @@ def manager_edit_logged_session():
     <form method="post" action="/manager/tracker/update">
 
     <input type="hidden" name="id" value="{s['id']}">
+
+    <label>Session Date</label>
+    <input type="date" name="date" value="{s['session_date']}" required>
 
     <label>Session Held</label>
     <select name="session_held">
@@ -12650,13 +13051,14 @@ def manager_update_session():
     if r:
         return r
 
-    conn=get_db()
-    cur=conn.cursor()
+    conn = get_db()
+    cur = conn.cursor()
 
     cur.execute("""
     UPDATE tutor_weekly_tracker
 
     SET
+        session_date=?,
         session_held=?,
         start_time=?,
         end_time=?,
@@ -12668,6 +13070,7 @@ def manager_update_session():
 
     """,(
 
+    request.form.get("date"),
     request.form.get("session_held"),
     request.form.get("start_time"),
     request.form.get("end_time"),
